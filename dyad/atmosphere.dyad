@@ -1,0 +1,135 @@
+"""
+Supplier for the `AirState` bus: density and wind for the whole aircraft.
+
+One instance feeds every aerodynamic element through a single `connect`,
+because `AirState` carries no flow variable and is therefore a pure
+broadcast.
+
+# Density
+
+With `isa_density = false` (the default) the density is the constant
+`rho0`. With `isa_density = true` it follows the ISA troposphere from the
+`altitude` input,
+
+    T = T0 - lapse*h,   rho = rho0 * (T/T0)^(g/(R*lapse) - 1)
+
+which is worth switching on for anything that changes height appreciably:
+density is down about 10% at 1000 m and 22% at 2500 m, and the speed to
+fly moves with it. `T` is clamped at `T_min` so the power stays real if
+the altitude input ever runs away; the clamp sits at the tropopause and is
+never active in normal flight.
+
+# Wind
+
+The wind velocity is resolved in the **world** frame and is uniform over
+the aircraft. With `wind_input = false` it is the constant `v_wind_0`;
+with `wind_input = true` it comes from the three input signals, so any
+time history --- a step, a 1-cos gust, a Dryden turbulence filter, a shear
+profile driven from the same altitude signal --- can be built from
+ordinary blocks upstream without touching this component or any consumer.
+
+Wind that varies *across* the airframe (the rolling moment at the edge of
+a thermal) is not represented: that needs a per-panel field query rather
+than a uniform bus.
+"""
+component Atmosphere
+  "Air state supplied to every aerodynamic element"
+  air = AirState()
+  "Geometric altitude, world y"
+  altitude = RealInput() if isa_density
+  "Commanded wind velocity, world frame, x component"
+  v_wind_x_in = RealInput() if wind_input
+  "Commanded wind velocity, world frame, y component"
+  v_wind_y_in = RealInput() if wind_input
+  "Commanded wind velocity, world frame, z component"
+  v_wind_z_in = RealInput() if wind_input
+
+  "Take the density from the ISA troposphere and the altitude input"
+  structural parameter isa_density::Boolean = false
+  "Take the wind from the input signals rather than from v_wind_0"
+  structural parameter wind_input::Boolean = false
+
+  "Sea level density, and the density used outright when isa_density is false"
+  parameter rho0::Density = 1.225
+  "Sea level temperature"
+  parameter T0::Temperature = 288.15
+  "Tropospheric temperature lapse rate"
+  parameter lapse::Real = 0.0065
+  "Temperature floor for the density power; the ISA tropopause"
+  parameter T_min::Temperature = 216.65
+  "Constant wind velocity, world frame, used when wind_input is false"
+  parameter v_wind_0::Velocity[3] = [0.0, 0.0, 0.0]
+
+  "Static air temperature"
+  variable T::Temperature
+relations
+  if isa_density
+    T = max(T0 - lapse * altitude, T_min)
+    air.rho = rho0 * (T / T0)^(9.80665 / (287.0528 * lapse) - 1)
+  else
+    T = T0
+    air.rho = rho0
+  end
+
+  if wind_input
+    air.v_wind_x = v_wind_x_in
+    air.v_wind_y = v_wind_y_in
+    air.v_wind_z = v_wind_z_in
+  else
+    air.v_wind_x = v_wind_0[1]
+    air.v_wind_y = v_wind_0[2]
+    air.v_wind_z = v_wind_0[3]
+  end
+end
+
+"""
+ISA density against altitude.
+
+The altitude input is ramped from sea level to 5000 m and the resulting
+density is compared with the standard atmosphere table.
+"""
+test component TestAtmosphereISA
+  atm = Atmosphere(isa_density = true, rho0 = 1.225)
+  "Altitude reached at the end of the ramp"
+  parameter h_end::Length = 5000.0
+  "Duration of the ramp"
+  parameter t_ramp::Time = 1.0
+relations
+  atm.altitude = h_end * time / t_ramp
+end
+
+"""
+Bus broadcast and wind subtraction.
+
+One `Atmosphere` feeds two `AeroSurface` panels and a `DragBody` through a
+single `connect`. Every element is carried at the same prescribed ground
+velocity, so any difference between them can only come from the bus. The
+wind is a headwind plus an updraught, which must raise both the dynamic
+pressure and the incidence relative to the still-air case.
+"""
+test component TestAtmosphereWind
+  world = MultibodyComponents.World(render = false)
+  atm = Atmosphere(rho0 = 1.225, v_wind_0 = [-10.0, 3.0, 0.0])
+  mover1 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
+  mover2 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 5.0], render = false)
+  mover3 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, -5.0], render = false)
+  surf1 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012)
+  surf2 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012)
+  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9)
+  "Ground speed of all three carriers, along world x"
+  parameter V_ground::Velocity = 25.0
+relations
+  mover1.v_x = V_ground
+  mover1.v_y = 0
+  mover1.v_z = 0
+  mover2.v_x = V_ground
+  mover2.v_y = 0
+  mover2.v_z = 0
+  mover3.v_x = V_ground
+  mover3.v_y = 0
+  mover3.v_z = 0
+  connect(atm.air, surf1.air, surf2.air, drag.air)
+  connect(mover1.frame_b, surf1.frame_a)
+  connect(mover2.frame_b, surf2.frame_a)
+  connect(mover3.frame_b, drag.frame_a)
+end

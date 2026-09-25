@@ -1,0 +1,246 @@
+# Flight dynamics utilities: trim, linearisation and modal analysis.
+#
+# A steady glide looks like it is going somewhere, but it is a genuine
+# equilibrium of every state except position: the world-frame velocity, the
+# attitude and the body rates are all constant, and only `r_0` integrates. So
+# trim is an ordinary root find on the model's own right-hand side rather than
+# something that has to be approached by simulating and hoping it settles.
+#
+# That distinction matters. An aircraft with a divergent phugoid or no fin will
+# never settle, so "simulate for 250 s and linearise" silently linearises about
+# an arbitrary point on a wandering trajectory. Everything here works from the
+# root find instead.
+#
+# These operate on the compiled `ODEProblem`, so they are independent of the
+# Dyad model's internals; they only assume the free-flying base is a
+# `MultibodyComponents.Body` carrying `r_0`, `v_0`, `w_a` and a quaternion
+# `Q_hat`, and that the frame convention is x forward, y up, z right.
+
+using LinearAlgebra
+using ModelingToolkit: unknowns
+import SymbolicIndexingInterface as SII
+
+"""
+    StateLayout(sys, body)
+
+Index of each base-body state inside the solver's state vector. Resolved by
+symbol, so it survives any reordering the compiler chooses.
+"""
+struct StateLayout
+    n::Int
+    v0::Vector{Int}
+    w::Vector{Int}
+    q::Vector{Int}
+    r::Vector{Int}
+end
+
+function StateLayout(sys, body)
+    # Resolve through SymbolicIndexingInterface rather than matching against
+    # `unknowns`: `body.v_0[i]` is a wrapped `Num` and the unknowns are raw
+    # symbolics, and any attempt to unwrap the list with a broadcast hits the
+    # broadcasting that symbolic arrays overload rather than mapping elementwise.
+    # An explicit check, not `something(idx, error(...))`: Julia evaluates both
+    # arguments of `something` before calling it, so the error would fire
+    # unconditionally.
+    function ix(v)
+        i = SII.variable_index(sys, v)
+        isnothing(i) && error("state $v is not an unknown of the simplified system; " *
+                              "is `body` the free-flying base with a quaternion orientation state?")
+        i
+    end
+    StateLayout(length(unknowns(sys)),
+                [ix(body.v_0[i]) for i in 1:3],
+                [ix(body.w_a[i]) for i in 1:3],
+                [ix(body.Q_hat[i]) for i in 1:4],
+                [ix(body.r_0[i]) for i in 1:3])
+end
+
+"""
+    glide_state(L, V, gamma, theta; altitude)
+
+State vector for a symmetric, wings-level glide: airspeed `V` along a flight
+path `gamma`, pitch attitude `theta`, zero body rates and no sideslip. The
+incidence that results is `theta - gamma`.
+
+Pitch is a rotation about the body z axis, so the attitude quaternion
+`[w,i,j,k]` is `[cos(theta/2), 0, 0, sin(theta/2)]`.
+"""
+function glide_state(L::StateLayout, V, gamma, theta; altitude = 500.0)
+    u = zeros(L.n)
+    u[L.v0[1]] = V * cos(gamma)
+    u[L.v0[2]] = V * sin(gamma)
+    u[L.r[2]]  = altitude
+    u[L.q[1]]  = cos(theta / 2)
+    u[L.q[4]]  = sin(theta / 2)
+    u
+end
+
+"""
+    trim_glide(prob, L, V; control, x0, altitude, tol, maxiter)
+
+Find the steady glide at airspeed `V`: solve for the flight path angle, the
+pitch attitude and the trim `control` (a symbolic parameter, normally the
+elevator) that drive the two velocity residuals and the pitch acceleration to
+zero.
+
+Three unknowns against three equations, so the trim is unique for a given `V`;
+sweep `V` to walk the glide polar. Returns a named tuple carrying the solution,
+the residual norm and a `converged` flag --- **check it**. Below the stall the
+required lift coefficient exceeds `CL_max`, no trim exists, and Newton will
+happily wander off to a nonsensical answer; a continuation sweep that feeds the
+previous solution forward will then poison every point after it.
+"""
+function trim_glide(prob, L::StateLayout, V;
+                    control, x0 = [-0.02, 0.03, 0.0], altitude = 500.0,
+                    tol = 1e-11, maxiter = 60,
+                    gamma_max = 0.5, control_max = 0.5)
+    f! = prob.f
+    du = zeros(L.n)
+    function residual(x)
+        prob.ps[control] = x[3]
+        f!(du, glide_state(L, V, x[1], x[2]; altitude), prob.p, 0.0)
+        [du[L.v0[1]], du[L.v0[2]], du[L.w[3]]]
+    end
+
+    x = collect(float.(x0))
+    r = residual(x)
+    iters = 0
+    for it in 1:maxiter
+        iters = it
+        norm(r) < tol && break
+        J = zeros(3, 3)
+        for j in 1:3
+            dx = copy(x); h = 1e-7; dx[j] += h
+            J[:, j] = (residual(dx) .- r) ./ h
+        end
+        x -= J \ r
+        r = residual(x)
+    end
+
+    converged = norm(r) < 1e-9 && abs(x[1]) < gamma_max && abs(x[3]) < control_max &&
+                all(isfinite, x)
+    (gamma = x[1], theta = x[2], control = x[3], x = x,
+     alpha = x[2] - x[1], LD = -1 / tan(x[1]), sink = -V * sin(x[1]),
+     residual = norm(r), iterations = iters, converged = converged)
+end
+
+"""
+    jacobian_at(prob, u, t = 0.0)
+
+Central-difference Jacobian of the right-hand side. Finite differences rather
+than AD because the multibody right-hand side is cheap here and this avoids the
+AD issues the library warns about.
+"""
+function jacobian_at(prob, u, t = 0.0)
+    n = length(u); f! = prob.f
+    J = zeros(n, n); fp = zeros(n); fm = zeros(n)
+    for j in 1:n
+        h = 1e-7 * max(1.0, abs(u[j]))
+        up = copy(u); up[j] += h; f!(fp, up, prob.p, t)
+        um = copy(u); um[j] -= h; f!(fm, um, prob.p, t)
+        J[:, j] = (fp .- fm) ./ (2h)
+    end
+    J
+end
+
+"""
+    longitudinal_indices(L) / lateral_indices(L)
+
+At a symmetric trim the Jacobian block-diagonalises. Splitting it before taking
+eigenvalues is what lets the phugoid be identified unambiguously: an aircraft
+with a weak fin has lateral modes at a similar frequency, and picking "the
+slowest oscillation" out of the full spectrum will sooner or later pick the
+wrong one.
+
+Position states are excluded --- they are pure integrators that feed nothing
+back while the density is uniform, and they would only contribute zero
+eigenvalues.
+"""
+longitudinal_indices(L::StateLayout) = [L.w[3], L.v0[2], L.v0[1], L.q[4], L.q[1]]
+lateral_indices(L::StateLayout)      = [L.w[2], L.w[1], L.v0[3], L.q[3], L.q[2]]
+
+"""
+    modes(J, idx)
+
+Eigenvalues of a sub-block, as `(lambda, period, zeta)` sorted slowest
+oscillation first, with the non-oscillatory roots after them.
+"""
+function modes(J, idx)
+    ev = eigvals(J[idx, idx])
+    osc = [e for e in ev if imag(e) > 1e-9]
+    real_roots = [e for e in ev if abs(imag(e)) <= 1e-9]
+    sort!(osc, by = e -> abs(imag(e)))
+    out = [(lambda = e, period = 2pi / imag(e), zeta = -real(e) / abs(e)) for e in osc]
+    append!(out, [(lambda = e, period = Inf, zeta = sign(-real(e))) for e in real_roots])
+    out
+end
+
+"""
+    trim_and_modes(prob, L, V; control, x0, altitude)
+
+Trim at `V`, then report the longitudinal and lateral modes there. The phugoid
+is the first longitudinal entry and the short period the last oscillatory one.
+"""
+function trim_and_modes(prob, L::StateLayout, V; control, x0 = [-0.02, 0.03, 0.0],
+                        altitude = 500.0)
+    tr = trim_glide(prob, L, V; control, x0, altitude)
+    tr.converged || return (trim = tr, lon = nothing, lat = nothing, J = nothing)
+    prob.ps[control] = tr.control
+    u = glide_state(L, V, tr.gamma, tr.theta; altitude)
+    J = jacobian_at(prob, u)
+    (trim = tr, lon = modes(J, longitudinal_indices(L)),
+     lat = modes(J, lateral_indices(L)), J = J)
+end
+
+"""
+    stability_derivatives(prob, L, tr, V; control, altitude)
+
+Dimensional longitudinal derivatives in body axes at a trim point, by
+perturbing the body-axis velocity components and the pitch rate.
+
+`w` is the *downward* body velocity, so `w = -v_body_y` in this frame's
+x-forward, y-up convention, and `Z` is positive down. These are the quantities
+to compare against handbook expressions: `Z_w` against `-rho*V*S*a/(2m)` and
+`M_q` against `-rho*V*S_t*l_t^2*a_t/(2*I_pitch)`.
+"""
+function stability_derivatives(prob, L::StateLayout, tr, V; control, altitude = 500.0)
+    prob.ps[control] = tr.control
+    th = tr.theta
+    R  = [cos(th) sin(th) 0.0; -sin(th) cos(th) 0.0; 0.0 0.0 1.0]  # world -> body
+    ub = V * cos(tr.alpha); wb = V * sin(tr.alpha)
+    du = zeros(L.n)
+    function forces(d_u, d_w, d_q)
+        v0 = R' * [ub + d_u, -(wb + d_w), 0.0]
+        u = glide_state(L, V, tr.gamma, tr.theta; altitude)
+        u[L.v0[1]] = v0[1]; u[L.v0[2]] = v0[2]; u[L.v0[3]] = v0[3]
+        u[L.w[3]]  = d_q
+        prob.f(du, u, prob.p, 0.0)
+        ab = R * [du[L.v0[1]], du[L.v0[2]], du[L.v0[3]]]
+        (X = ab[1], Z = -ab[2], M = du[L.w[3]])
+    end
+    h = 1e-4
+    d(sel, a, b) = (getfield(a, sel) - getfield(b, sel)) / (2h)
+    pu, mu = forces(h, 0, 0), forces(-h, 0, 0)
+    pw, mw = forces(0, h, 0), forces(0, -h, 0)
+    pq, mq = forces(0, 0, h), forces(0, 0, -h)
+    (Xu = d(:X, pu, mu), Zu = d(:Z, pu, mu), Mu = d(:M, pu, mu),
+     Xw = d(:X, pw, mw), Zw = d(:Z, pw, mw), Mw = d(:M, pw, mw),
+     Mq = d(:M, pq, mq))
+end
+
+"""
+    glide_polar(prob, L, Vs; control, altitude)
+
+Trim across a range of airspeeds by continuation, feeding each solution forward
+as the next guess. Points that fail to converge (below the stall, typically)
+come back with `converged = false` and do **not** seed the next point.
+"""
+function glide_polar(prob, L::StateLayout, Vs; control, x0 = [-0.02, 0.03, 0.0],
+                     altitude = 500.0)
+    seed = collect(float.(x0))
+    map(Vs) do V
+        tr = trim_glide(prob, L, V; control, x0 = seed, altitude)
+        tr.converged && (seed = tr.x)
+        (V = V, trim = tr)
+    end
+end

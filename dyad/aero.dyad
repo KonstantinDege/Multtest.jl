@@ -1,0 +1,273 @@
+"""
+Broadcast bus carrying the state of the air mass.
+
+All fields are `potential` and there is no `flow` field, so a single
+`connect` between an atmosphere component and any number of aerodynamic
+consumers simply equates the values: the bus is a pure one-to-many
+broadcast and adds no force or mass balance of its own.
+
+The wind velocity is resolved in the **world** frame.
+"""
+connector AirState
+  "Air density"
+  potential rho::Density
+  "Wind velocity, world frame, x component (world x is forward)"
+  potential v_wind_x::Velocity
+  "Wind velocity, world frame, y component (world y is up)"
+  potential v_wind_y::Velocity
+  "Wind velocity, world frame, z component (world z is to the right)"
+  potential v_wind_z::Velocity
+end
+
+"""
+Quasi-steady aerodynamic panel (one strip of a lifting surface).
+
+# Mounting and frame convention
+
+`frame_a` must be placed at the panel's **aerodynamic centre** (quarter
+chord of the panel's mean chord) and oriented so that
+
+* `+x` is chordwise, pointing forward (into the free stream at zero
+  incidence),
+* `+y` is the positive-lift direction (up, for a wing panel),
+* `+z` is spanwise, completing the right-handed triad.
+
+Because the panel is rigidly attached at its own frame, the multibody
+kinematics supply the true velocity of that point, including the
+`omega x r` contribution. Roll, pitch and yaw damping therefore emerge
+from the placement of the panels and need no damping derivatives. A
+vertical fin is this same component mounted with a 90 degree rotation
+about `+x`: its incidence angle then *is* the sideslip angle.
+
+# Aerodynamic model
+
+Quasi-steady strip theory in the panel's x-y plane (the cross-flow
+principle: the spanwise velocity component does not contribute). Two
+coefficient sets are blended so the model stays valid over the whole
+incidence range, not just the linear one:
+
+* attached flow --- `CL = CL0 + CL_alpha*sin(a) + CL_delta*delta`, with
+  `CD = CD0 + CL^2/(pi*e*AR)`,
+* separated / reversed flow --- flat plate, `CL = 2*sign(a)*sin^2(a)*cos(a)`
+  and `CD = CD0 + 2*sin^2(a)`, together with the rearward shift of the
+  centre of pressure towards mid chord, which produces the nose-down
+  pitch break at the stall.
+
+The blend weight `sigma` is a smooth `tanh` in `|sin(a)|` about
+`alpha_stall`, smoothly OR-ed with a reverse-flow weight in `cos(a)`, so
+every coefficient is bounded and continuously differentiable for any
+incidence in [-pi, pi] and for flow arriving from behind.
+
+`alpha_stall` is the *centre* of that blend, not the incidence of maximum
+lift: the blend begins to bite a little earlier, so `CL_max` is reached
+a few degrees below `alpha_stall` and falls below the linear value there.
+Tune `alpha_stall` and `M_stall` together against the section polar you
+are matching --- raising `M_stall` sharpens the stall and moves the peak
+closer to `alpha_stall`.
+
+# Numerical conditioning
+
+The force is proportional to the *unregularised* dynamic pressure and so
+vanishes exactly at zero airspeed. The incidence enters only through the
+regularised direction cosines `sa`, `ca`, formed with
+`V = sqrt(u^2 + w^2 + v_eps^2)`, so no derivative is singular at zero
+airspeed and the component is safe to use from rest (ground roll, launch,
+a stall to zero airspeed). `alpha` itself is reported as a diagnostic and
+no equation depends on it.
+
+Only the camber couple and the stall pitch break are applied as a torque:
+the moment of the lift and drag about the vehicle centre of gravity comes
+out of the multibody geometry, because the force acts at the panel's
+aerodynamic centre.
+"""
+component AeroSurface
+  "Mount at the panel's aerodynamic centre; +x chordwise forward, +y lift, +z spanwise"
+  frame_a = Frame3D()
+  "Density and wind at the panel"
+  air = AirState()
+  "Control surface deflection, positive trailing edge down"
+  delta = RealInput() if has_control
+
+  "Give the panel a control surface deflection input"
+  structural parameter has_control::Boolean = false
+
+  "Panel reference (planform) area"
+  parameter S::Area = 1.0
+  "Panel mean aerodynamic chord, used for the pitching moment"
+  parameter c::Length = 1.0
+  "Aspect ratio of the *parent* surface, used for the induced drag of this panel"
+  parameter AR::Real = 8.0
+  "Oswald span efficiency of the parent surface"
+  parameter e_oswald::Real = 0.85
+  "Lift coefficient at zero incidence (camber)"
+  parameter CL0::Real = 0.0
+  "Lift curve slope of the parent surface, per radian (3D value)"
+  parameter CL_alpha::Real = 5.0
+  "Profile drag coefficient"
+  parameter CD0::Real = 0.01
+  "Pitching moment coefficient about the aerodynamic centre at zero lift"
+  parameter CM0::Real = 0.0
+  "Incidence at which the flow separates"
+  parameter alpha_stall::Angle = 0.26
+  "Sharpness of the stall blend; larger is a more abrupt stall"
+  parameter M_stall::Real = 25.0
+  "Sharpness of the reverse-flow blend"
+  parameter M_rev::Real = 15.0
+  "Lift coefficient per radian of control deflection"
+  parameter CL_delta::Real = 0.0
+  "Pitching moment coefficient per radian of control deflection"
+  parameter CM_delta::Real = 0.0
+  "Drag coefficient per radian squared of control deflection"
+  parameter CD_delta::Real = 0.0
+  "Airspeed below which the incidence is faded out; keep well below any flight speed"
+  parameter v_eps::Velocity = 0.5
+  "Smoothing constant for |sin(alpha)|"
+  parameter s_eps::Real = 1e-4
+
+  "Velocity of the panel relative to the air mass, world frame"
+  variable v_rel_0::Velocity[3]
+  "Velocity of the panel relative to the air mass, panel frame"
+  variable v_rel_s::Velocity[3]
+  "Chordwise component of the panel velocity through the air"
+  variable u::Velocity
+  "Downward component of the panel velocity through the air"
+  variable w::Velocity
+  "Regularised in-plane airspeed"
+  variable V::Velocity
+  "Regularised sin(alpha)"
+  variable sa::Real
+  "Regularised cos(alpha)"
+  variable ca::Real
+  "Smoothed |sin(alpha)|"
+  variable sa_abs::Real
+  "Incidence (diagnostic only; no equation depends on it)"
+  variable alpha::Angle
+  "Separation blend weight, 0 attached, 1 fully separated or reversed"
+  variable sigma::Real
+  "Attached-flow lift coefficient"
+  variable CL_att::Real
+  "Blended lift coefficient"
+  variable CL::Real
+  "Blended drag coefficient"
+  variable CD::Real
+  "Normal force coefficient"
+  variable CN::Real
+  "Pitching moment coefficient about the aerodynamic centre"
+  variable CM::Real
+  "Dynamic pressure"
+  variable q::Pressure
+  "Lift"
+  variable L::Dyad.Force
+  "Drag"
+  variable D::Dyad.Force
+  "Aerodynamic force applied to frame_a, panel frame"
+  variable F_s::Dyad.Force[3]
+  "Effective control deflection"
+  variable d_eff::Angle
+relations
+  # --- kinematics: velocity of this point through the air mass -------------
+  v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
+  v_rel_s = MultibodyComponents.resolve2(frame_a.R, v_rel_0)
+  u = v_rel_s[1]
+  w = -v_rel_s[2]
+
+  # --- regularised incidence ----------------------------------------------
+  V = sqrt(u^2 + w^2 + v_eps^2)
+  sa = w / V
+  ca = u / V
+  sa_abs = sqrt(sa^2 + s_eps^2)
+  alpha = atan(w, u)
+
+  # --- control deflection --------------------------------------------------
+  if has_control
+    d_eff = delta
+  else
+    d_eff = 0
+  end
+
+  # --- attached / separated blend ------------------------------------------
+  sigma = 1 - (1 - 0.5 * (1 + tanh(M_stall * (sa_abs - sin(alpha_stall))))) *
+              (1 - 0.5 * (1 - tanh(M_rev * ca)))
+
+  # --- coefficients ---------------------------------------------------------
+  CL_att = CL0 + CL_alpha * sa + CL_delta * d_eff
+  CL = (1 - sigma) * CL_att + sigma * (2 * sa * sa_abs * ca)
+  CD = CD0 + (1 - sigma) * (CL_att^2 / (3.141592653589793 * e_oswald * AR)
+                            + CD_delta * d_eff^2)
+            + sigma * (2 * sa^2)
+  CN = CL * ca + CD * sa
+  CM = CM0 + CM_delta * d_eff - sigma * 0.25 * CN
+
+  # --- forces ---------------------------------------------------------------
+  q = 0.5 * air.rho * (u^2 + w^2)
+  L = q * S * CL
+  D = q * S * CD
+  F_s = [L * sa - D * ca, L * ca + D * sa, 0]
+  frame_a.f = -F_s
+  frame_a.tau = -[0, 0, q * S * c * CM]
+end
+
+"""
+Incidence sweep of a single `AeroSurface`.
+
+The panel is carried by a `PrescribedVelocity` with the world orientation,
+and the *direction* of the prescribed velocity is rotated through a full
+turn, so the panel incidence is exactly `phi(t)` and the sweep covers the
+attached, stalled and reverse-flow regimes without ever changing the
+panel's attitude.
+"""
+test component TestAeroSweep
+  world = MultibodyComponents.World(render = false)
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9,
+                     CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05,
+                     alpha_stall = 0.26)
+  "Airspeed held constant through the sweep"
+  parameter V_test::Velocity = 25.0
+  "Duration of one full turn of the velocity vector"
+  parameter t_sweep::Time = 1.0
+  "Commanded incidence"
+  variable phi::Angle
+relations
+  phi = -3.141592653589793 + 2 * 3.141592653589793 * time / t_sweep
+  mover.v_x = V_test * cos(phi)
+  mover.v_y = -V_test * sin(phi)
+  mover.v_z = 0
+  surf.air.rho = 1.225
+  surf.air.v_wind_x = 0
+  surf.air.v_wind_y = 0
+  surf.air.v_wind_z = 0
+  connect(mover.frame_b, surf.frame_a)
+end
+
+"""
+Airspeed ramp from rest at a fixed incidence.
+
+Checks that the panel is well conditioned at and near zero airspeed and
+that the force grows as the square of the airspeed.
+"""
+test component TestAeroSpeedRamp
+  world = MultibodyComponents.World(render = false)
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9,
+                     CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05,
+                     alpha_stall = 0.26)
+  "Incidence held constant through the ramp"
+  parameter alpha_test::Angle = 0.0873
+  "Airspeed reached at the end of the ramp"
+  parameter V_end::Velocity = 40.0
+  "Duration of the ramp"
+  parameter t_ramp::Time = 1.0
+  "Commanded airspeed"
+  variable V_cmd::Velocity
+relations
+  V_cmd = V_end * time / t_ramp
+  mover.v_x = V_cmd * cos(alpha_test)
+  mover.v_y = -V_cmd * sin(alpha_test)
+  mover.v_z = 0
+  surf.air.rho = 1.225
+  surf.air.v_wind_x = 0
+  surf.air.v_wind_y = 0
+  surf.air.v_wind_z = 0
+  connect(mover.frame_b, surf.frame_a)
+end

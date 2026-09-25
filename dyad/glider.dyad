@@ -1,0 +1,190 @@
+"""
+Standard class glider, 15 m span.
+
+The fuselage `Body` is the free-flying base: it owns the position and the
+quaternion orientation states and is *not* attached to the world by any
+joint. Everything else hangs off its `frame_a`, whose axes are x forward,
+y up, z to the right, matching the world frame convention.
+
+# The datum is the centre of gravity
+
+`fuselage.frame_a` is the aircraft datum, and the fuselage mass is placed
+so that the *composite* centre of gravity of the whole aircraft falls
+exactly on it: `r_cm_fuselage` is computed from the surface masses and
+their stations rather than being set by hand. This is what ballast does on
+a real glider, and it is what makes `x_ac_wing` mean "wing aerodynamic
+centre ahead of the centre of gravity" --- the quantity that sets the
+static margin --- instead of "ahead of an arbitrary reference point".
+
+Change a surface mass or station and the fuselage mass moves to rebalance,
+so the static margin stays the property of the aerodynamic geometry alone.
+
+# Inertia axes
+
+In this frame roll is about x, **yaw is about y** and **pitch is about z**,
+so the diagonal inertia entries map as `I_11 = roll`, `I_22 = yaw`,
+`I_33 = pitch`. The values are quoted about the fuselage's own centre of
+mass, which is where `Body` expects them; the parallel axis shift to the
+datum is done by `Body` from `r_cm`.
+"""
+component Glider
+  "Density and wind"
+  air = AirState()
+  "Elevator deflection, positive trailing edge down, which pitches the nose down"
+  elevator = RealInput() if has_htail
+  fuselage = MultibodyComponents.Body(m = m_fuselage, r_cm = r_cm_fuselage, I_11 = I_fus_roll, I_22 = I_fus_yaw, I_33 = I_fus_pitch, orientation_state = MultibodyComponents.OrientationState.Quaternion(), statePriority = 1000, linearStatePriority = 1000, initialize_orientation = false, r_0(initial = r_start), v_0(initial = v_start), Q_hat(initial = q_start))
+  wing = Wing(b = b_wing, S = S_wing, x_ac = x_ac_wing, y_ac = y_ac_wing, dihedral = dihedral_wing, incidence = incidence_wing, m = m_wing, CL0 = 0.25, CL_alpha = 5.7, CD0 = 0.008, CM0 = -0.09, e_oswald = 0.95, alpha_stall = 0.244)
+  fus_mount = MultibodyComponents.FixedTranslation(r = [x_cp_fuselage, 0.0, 0.0], render = false)
+  fus_drag = DragBody(CdA_x = CdA_fus_x, CdA_y = CdA_fus_y, CdA_z = CdA_fus_z)
+  htail = Wing(has_control = true, b = b_htail, S = S_htail, x_ac = x_ac_htail, y_ac = y_ac_htail, dihedral = 0.0, incidence = incidence_htail, m = m_htail, I_panel = 2.0, CL0 = 0.0, CL_alpha = 4.4, CD0 = 0.008, CM0 = 0.0, e_oswald = 0.85, alpha_stall = 0.244, CL_delta = CL_delta_elev, CM_delta = -0.55, CD_delta = 0.02) if has_htail
+  "Fit a horizontal tail; false leaves the aircraft pitch unstable on purpose"
+  structural parameter has_htail::Boolean = true
+  # --- fuselage -------------------------------------------------------------
+  "Mass of the fuselage, including the pilot and everything not in a surface"
+  parameter m_fuselage::Mass = 230.0
+  "Fuselage roll inertia about its own centre of mass"
+  parameter I_fus_roll::Inertia = 35.0
+  "Fuselage yaw inertia about its own centre of mass"
+  parameter I_fus_yaw::Inertia = 700.0
+  "Fuselage pitch inertia about its own centre of mass"
+  parameter I_fus_pitch::Inertia = 700.0
+  # --- launch condition -----------------------------------------------------
+  """
+  Launch state, given the way a flight condition is actually quoted: a
+  speed, a flight path angle and a pitch attitude. The incidence follows as
+  `theta_start - gamma_start`. The defaults are the hand-computed trim of
+  the rig below; a residual here simply excites the phugoid.
+  """
+  parameter r_start::Position[3] = [0.0, 500.0, 0.0]
+  "Airspeed at release"
+  parameter V_start::Velocity = 25.0
+  "Flight path angle at release, negative descending"
+  parameter gamma_start::Angle = -0.0235
+  "Pitch attitude at release, positive nose up"
+  parameter theta_start::Angle = 0.0257
+
+  "Initial velocity of the datum, world frame"
+  final parameter v_start::Velocity[3] =
+      [V_start * cos(gamma_start), V_start * sin(gamma_start), 0.0]
+  "Initial attitude quaternion [w,i,j,k]; pitch is a rotation about the body z axis"
+  final parameter q_start::Real[4] =
+      [cos(theta_start / 2), 0.0, 0.0, sin(theta_start / 2)]
+  # --- wing -----------------------------------------------------------------
+  "Wing span"
+  parameter b_wing::Length = 15.0
+  "Wing area"
+  parameter S_wing::Area = 10.5
+  """
+  Wing aerodynamic centre ahead of the centre of gravity. This is the static
+  margin knob: because the datum is the centre of gravity, moving the wing
+  aerodynamic centre forward is the same as moving the centre of gravity aft,
+  and the neutral point follows at about 0.9 times the change. Trimmed at
+  0.205 m the aircraft sits near 18% MAC, in the usual sailplane band.
+  """
+  parameter x_ac_wing::Length = 0.205
+  "Wing aerodynamic centre above the centre of gravity"
+  parameter y_ac_wing::Length = 0.0
+  "Wing dihedral"
+  parameter dihedral_wing::Angle = 0.052
+  "Wing incidence relative to the fuselage datum, so the fuselage flies near zero incidence"
+  parameter incidence_wing::Angle = 0.05236
+  "Wing mass"
+  parameter m_wing::Mass = 100.0
+  # --- horizontal tail ------------------------------------------------------
+  "Tailplane span"
+  parameter b_htail::Length = 2.2
+  "Tailplane area"
+  parameter S_htail::Area = 1.0
+  "Tailplane aerodynamic centre ahead of the centre of gravity; negative is aft"
+  parameter x_ac_htail::Length = -4.0
+  "Tailplane aerodynamic centre above the centre of gravity"
+  parameter y_ac_htail::Length = 0.25
+  """
+  Tailplane incidence relative to the fuselage datum. This is the rigging
+  angle that sets the trim speed: the wing's camber moment `CM0` is
+  nose-down and has to be balanced by a download on the tail, so the
+  tailplane is set at a negative incidence. With it at zero the aircraft
+  still trims, but at a useless incidence of about -2 degrees, and dives
+  away at 90 m/s.
+  """
+  parameter incidence_htail::Angle = -0.037373
+  "Tailplane mass"
+  parameter m_htail::Mass = 12.0
+  "Tailplane lift coefficient per radian of elevator deflection"
+  parameter CL_delta_elev::Real = 2.2
+
+  # --- fuselage aerodynamics ------------------------------------------------
+  """
+  Station of the fuselage drag point, ahead of the centre of gravity. Slender
+  body theory puts the body's normal force about a quarter of the body length
+  behind the nose, which for this fuselage is just ahead of the centre of
+  gravity; that is what produces the fuselage's destabilising contribution to
+  pitch and yaw, so the station matters more than the drag areas do.
+  """
+  parameter x_cp_fuselage::Length = 0.225
+  "Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider"
+  parameter CdA_fus_x::Area = 0.05
+  "Fuselage normal drag area Cd*S, from the plan area and a slender-body cross-flow Cd"
+  parameter CdA_fus_y::Area = 2.1
+  "Fuselage side drag area Cd*S, from the side area and a slender-body cross-flow Cd"
+  parameter CdA_fus_z::Area = 2.4
+  "Spanwise station of the wing panels"
+  final parameter y_panel_wing::Length = b_wing / (2 * sqrt(3.0))
+  "Height of the wing mass above the datum"
+  final parameter y_cm_wing::Length = y_ac_wing + y_panel_wing * sin(dihedral_wing)
+  "Mass of the tailplane actually fitted"
+  final parameter m_htail_fitted::Mass = ifelse(has_htail, m_htail, 0.0)
+  "Total aircraft mass"
+  final parameter m_total::Mass = m_fuselage + m_wing + m_htail_fitted
+  """
+  Fuselage centre of mass relative to the datum, chosen so that the
+  composite centre of gravity of the aircraft lands on the datum.
+  """
+  final parameter r_cm_fuselage::Position[3] = -(m_wing * [x_ac_wing, y_cm_wing, 0.0] + m_htail_fitted * [x_ac_htail, y_ac_htail, 0.0]) / m_fuselage
+relations
+  connect(fuselage.frame_a, wing.frame_a)
+  connect(air, wing.air)
+  connect(fuselage.frame_a, fus_mount.frame_a)
+  connect(fus_mount.frame_b, fus_drag.frame_a)
+  connect(air, fus_drag.air)
+  if has_htail
+    connect(fuselage.frame_a, htail.frame_a)
+    connect(air, htail.air)
+    connect(elevator, htail.delta_l, htail.delta_r)
+  end
+end
+
+"""
+Free flight with the wing only, released level.
+
+With no tailplane the wing lift acts ahead of the centre of gravity, so
+`dCm/dalpha` has the wrong sign and the aircraft has no pitch stiffness:
+the expected result is a monotone pitch departure, not a glide. This is the
+increment that proves the tail is what stabilises the aircraft rather than
+some artefact of the assembly.
+"""
+test component TestGliderWingOnly
+  world = MultibodyComponents.World()
+  atm = Atmosphere(rho0 = 1.225)
+  glider = Glider(has_htail = false)
+relations
+  connect(atm.air, glider.air)
+end
+
+"""
+Free flight with wing and tailplane, released level with the elevator
+neutral.
+
+The aircraft now has pitch stiffness, so instead of departing it should
+converge onto a glide, oscillating on the way in the slow, lightly damped
+phugoid mode whose period is close to `pi*sqrt(2)*V/g`.
+"""
+test component TestGliderTailed
+  world = MultibodyComponents.World()
+  atm = Atmosphere(rho0 = 1.225)
+  glider = Glider()
+  elev = BlockComponents.Sources.Constant(k = 0.0)
+relations
+  connect(atm.air, glider.air)
+  connect(elev.y, glider.elevator)
+end

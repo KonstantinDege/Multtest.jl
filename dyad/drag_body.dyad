@@ -1,0 +1,122 @@
+"""
+Non-lifting bluff-body drag acting at a single point.
+
+Intended for the fuselage, canopy, undercarriage and any other item that
+adds drag without a lift curve. The drag area is given separately per body
+axis,
+
+    F = -0.5 * rho * |v| * [CdA_x*v_x, CdA_y*v_y, CdA_z*v_z]
+
+with `v` the velocity of the mounting point through the air mass, resolved
+in `frame_a`. A slender fuselage has a small axial drag area and a much
+larger lateral and normal one, and the anisotropy is what makes the body
+produce a side force in sideslip at all.
+
+# Where to mount it
+
+Mount `frame_a` at the body's **centre of pressure**, not at its centroid:
+for a slender body that is roughly a quarter of the body length behind the
+nose, well ahead of the aircraft centre of gravity. The normal and side
+forces then act ahead of the CG and generate the destabilising pitching and
+yawing moment of the fuselage (the Munk moment) directly out of the
+multibody geometry, which is what the fin and tailplane have to be sized
+against. Mounting it at the CG silently removes that moment and makes the
+aircraft look more stable than it is.
+
+Several instances may be strung along a fuselage if a single point is too
+coarse.
+
+# Numerical conditioning
+
+`|v|` is formed as `sqrt(v.v + v_eps^2)`, so the force is smooth through
+zero velocity and vanishes there; the component is safe at rest.
+
+No torque is applied: a point drag force has no couple of its own.
+"""
+component DragBody
+  "Mount at the body's centre of pressure"
+  frame_a = Frame3D()
+  "Density and wind at the body"
+  air = AirState()
+
+  "Drag area Cd*S for motion along the body x axis"
+  parameter CdA_x::Area = 0.05
+  "Drag area Cd*S for motion along the body y axis"
+  parameter CdA_y::Area = 1.0
+  "Drag area Cd*S for motion along the body z axis"
+  parameter CdA_z::Area = 1.0
+  "Speed below which the drag is faded out; keep well below any flight speed"
+  parameter v_eps::Velocity = 0.5
+
+  "Velocity of the mounting point relative to the air mass, world frame"
+  variable v_rel_0::Velocity[3]
+  "Velocity of the mounting point relative to the air mass, body frame"
+  variable v_rel_s::Velocity[3]
+  "Regularised speed through the air"
+  variable V::Velocity
+  "Drag force applied to frame_a, body frame"
+  variable F_s::Dyad.Force[3]
+  "Magnitude of the drag force"
+  variable D::Dyad.Force
+relations
+  v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
+  v_rel_s = MultibodyComponents.resolve2(frame_a.R, v_rel_0)
+  V = sqrt(v_rel_s[1]^2 + v_rel_s[2]^2 + v_rel_s[3]^2 + v_eps^2)
+  F_s = -0.5 * air.rho * V * [CdA_x * v_rel_s[1],
+                              CdA_y * v_rel_s[2],
+                              CdA_z * v_rel_s[3]]
+  D = sqrt(F_s[1]^2 + F_s[2]^2 + F_s[3]^2)
+  frame_a.f = -F_s
+  frame_a.tau = [0, 0, 0]
+end
+
+"""
+Terminal velocity of a body dropped from rest with isotropic drag.
+
+The steady state must satisfy `m*g = 0.5*rho*CdA*v^2`, so the body settles
+at `v = sqrt(2*m*g/(rho*CdA))`. This is the dynamic check on the component:
+the drag is the only thing balancing gravity, so getting the magnitude or
+the sign wrong is immediately visible.
+"""
+test component TestDragTerminal
+  world = MultibodyComponents.World()
+  body = MultibodyComponents.Body(m = 1.0,
+                                  orientation_state = MultibodyComponents.OrientationState.Quaternion(),
+                                  statePriority = 1000, linearStatePriority = 1000)
+  drag = DragBody(CdA_x = 0.5, CdA_y = 0.5, CdA_z = 0.5)
+relations
+  drag.air.rho = 1.225
+  drag.air.v_wind_x = 0
+  drag.air.v_wind_y = 0
+  drag.air.v_wind_z = 0
+  connect(body.frame_a, drag.frame_a)
+end
+
+"""
+Direction sweep at constant speed, to check the per-axis drag areas.
+
+The mounting point is driven at a constant speed whose direction turns
+through a full circle in the body x-y plane; each force component must
+follow `-0.5*rho*|v|*CdA_i*v_i` with its own drag area.
+"""
+test component TestDragAnisotropy
+  world = MultibodyComponents.World(render = false)
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
+  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9)
+  "Speed held constant through the sweep"
+  parameter V_test::Velocity = 30.0
+  "Duration of one full turn of the velocity vector"
+  parameter t_sweep::Time = 1.0
+  "Direction of the velocity vector in the body x-y plane"
+  variable phi::Angle
+relations
+  phi = 2 * 3.141592653589793 * time / t_sweep
+  mover.v_x = V_test * cos(phi)
+  mover.v_y = V_test * sin(phi)
+  mover.v_z = 0
+  drag.air.rho = 1.225
+  drag.air.v_wind_x = 0
+  drag.air.v_wind_y = 0
+  drag.air.v_wind_z = 0
+  connect(mover.frame_b, drag.frame_a)
+end

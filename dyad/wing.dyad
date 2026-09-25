@@ -1,0 +1,129 @@
+"""
+A lifting surface made of a left and a right panel, with its mass.
+
+`frame_a` mounts on the fuselage at the aircraft reference point (the
+centre of gravity for the main wing). From there the surface is built as
+
+    frame_a -> [x_ac, y_ac, 0] -> dihedral -> spanwise -> incidence -> panel
+
+per side, so the panel frames carry the correct position *and* attitude and
+the multibody kinematics give each panel its own local velocity. Roll
+damping, the rolling moment due to sideslip from the dihedral, and the
+yawing moment from the differential panel drag all follow from that
+placement; none of them is supplied as a derivative.
+
+# Spanwise station of the panels
+
+With one panel per semi-span the station that matters is the one that
+reproduces the *second* moment of the semi-span, not the centroid, because
+roll damping weights each strip by the square of its lever arm. For a
+uniform chord that station is `(b/2)/sqrt(3)`, which is the default. It has
+the useful property of also reproducing the roll inertia of a uniform-mass
+wing exactly when half the wing mass is placed on each panel, so the
+aerodynamic and the inertial lever arms agree.
+
+It does slightly over-state the dihedral effect, which weights the lever arm
+linearly. Raise the panel count if the roll response has to be right to
+better than a few per cent.
+
+# Also used for the tailplane and the fin
+
+The horizontal tail is this component with a smaller area, aspect ratio and
+tail arm. The fin is this component with `mirror_right = false`, mounted
+through a 90 degree roll, so the panel's incidence angle becomes the
+sideslip angle and its lift becomes a side force.
+"""
+component Wing
+  "Mount on the fuselage at the aircraft reference point"
+  frame_a = Frame3D()
+  "Density and wind"
+  air = AirState()
+  "Left panel control deflection, positive trailing edge down"
+  delta_l = RealInput() if has_control
+  "Right panel control deflection, positive trailing edge down"
+  delta_r = RealInput() if has_control
+  # --- structure: mount to the surface root --------------------------------
+  root = MultibodyComponents.FixedTranslation(r = [x_ac, y_ac, 0.0], render = false)
+  # --- left panel ----------------------------------------------------------
+  dih_l = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = dihedral, render = false)
+  span_l = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, -y_panel], render = false)
+  inc_l = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false)
+  panel_l = AeroSurface(has_control = has_control, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta)
+  mass_l = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false)
+  # --- right panel ---------------------------------------------------------
+  dih_r = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = -dihedral, render = false) if mirror_right
+  span_r = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, y_panel], render = false) if mirror_right
+  inc_r = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false) if mirror_right
+  panel_r = AeroSurface(has_control = has_control, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) if mirror_right
+  mass_r = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false) if mirror_right
+  "Give the panels control surface deflection inputs"
+  structural parameter has_control::Boolean = false
+  "Build the right panel; set false for a single-panel surface such as a fin"
+  structural parameter mirror_right::Boolean = true
+  "Span, tip to tip"
+  parameter b::Length = 15.0
+  "Reference (planform) area of the whole surface"
+  parameter S::Area = 10.5
+  "Aerodynamic centre ahead of the mount, along frame_a x"
+  parameter x_ac::Length = 0.10
+  "Aerodynamic centre above the mount, along frame_a y"
+  parameter y_ac::Length = 0.0
+  "Dihedral angle, positive tips up"
+  parameter dihedral::Angle = 0.0
+  "Incidence of the surface relative to the mount, positive leading edge up"
+  parameter incidence::Angle = 0.0
+  "Mass of the whole surface"
+  parameter m::Mass = 100.0
+  "Own moment of inertia of each panel mass about its own frame"
+  parameter I_panel::Inertia = 5.0
+  "Lift coefficient at zero incidence"
+  parameter CL0::Real = 0.25
+  "Lift curve slope of the surface, per radian (3D value)"
+  parameter CL_alpha::Real = 5.7
+  "Profile drag coefficient"
+  parameter CD0::Real = 0.008
+  "Pitching moment coefficient about the aerodynamic centre at zero lift"
+  parameter CM0::Real = -0.09
+  "Oswald span efficiency"
+  parameter e_oswald::Real = 0.95
+  "Incidence at the centre of the stall blend"
+  parameter alpha_stall::Angle = 0.244
+  "Sharpness of the stall blend"
+  parameter M_stall::Real = 25.0
+  "Lift coefficient per radian of control deflection"
+  parameter CL_delta::Real = 0.0
+  "Pitching moment coefficient per radian of control deflection"
+  parameter CM_delta::Real = 0.0
+  "Drag coefficient per radian squared of control deflection"
+  parameter CD_delta::Real = 0.0
+  "Spanwise station of the panels, measured from the root along the span"
+  parameter y_panel::Length = b / (2 * sqrt(3.0))
+  "Aspect ratio of the surface"
+  final parameter AR::Real = b ^ 2 / S
+  "Mean aerodynamic chord"
+  final parameter c_bar::Length = S / b
+  "Area carried by each panel"
+  final parameter S_panel::Area = ifelse(mirror_right, S / 2, S)
+  "Mass carried by each panel"
+  final parameter m_panel::Mass = ifelse(mirror_right, m / 2, m)
+relations
+  connect(frame_a, root.frame_a)
+  connect(root.frame_b, dih_l.frame_a)
+  connect(dih_l.frame_b, span_l.frame_a)
+  connect(span_l.frame_b, inc_l.frame_a)
+  connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a)
+  connect(air, panel_l.air)
+  if has_control
+    connect(delta_l, panel_l.delta)
+  end
+  if mirror_right
+    connect(root.frame_b, dih_r.frame_a)
+    connect(dih_r.frame_b, span_r.frame_a)
+    connect(span_r.frame_b, inc_r.frame_a)
+    connect(inc_r.frame_b, panel_r.frame_a, mass_r.frame_a)
+    connect(air, panel_r.air)
+    if has_control
+      connect(delta_r, panel_r.delta)
+    end
+  end
+end
