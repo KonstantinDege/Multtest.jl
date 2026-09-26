@@ -65,6 +65,23 @@ Tune `alpha_stall` and `M_stall` together against the section polar you
 are matching --- raising `M_stall` sharpens the stall and moves the peak
 closer to `alpha_stall`.
 
+# Known limitation: no laminar drag bucket
+
+`CD0` is constant, so the only thing raising the profile drag at high lift
+is the separation blend. A real laminar section leaves its low-drag bucket
+well before the stall and its profile drag climbs steeply from there.
+
+The consequence is visible on a glide polar: the minimum sink point still
+comes out as a genuine minimum, because the separation blend does raise the
+drag near the stall, but it sits closer to the stall than it should. For the
+glider in this package minimum sink falls at about 1.06 times the stall
+speed where a real sailplane shows about 1.15. Nothing else in the polar is
+affected --- best glide, which occurs at a much lower lift coefficient, is
+untouched.
+
+Adding the bucket means making `CD0` a function of `CL_att`; it was left out
+rather than guessed, since it needs section data to be worth anything.
+
 # Numerical conditioning
 
 The force is proportional to the *unregularised* dynamic pressure and so
@@ -88,8 +105,18 @@ component AeroSurface
   "Control surface deflection, positive trailing edge down"
   delta = RealInput() if has_control
 
+  "Downwash velocity at the panel, positive downward, in the panel frame"
+  w_induced = RealInput() if has_induced_flow
+
   "Give the panel a control surface deflection input"
   structural parameter has_control::Boolean = false
+  """
+  Give the panel an induced-flow input, for a surface sitting in the wake of
+  another. Downwash is a velocity, not a coefficient correction, so it enters
+  the panel's own flow calculation and the resulting reduction in incidence
+  carries through the lift, the drag and the moment together.
+  """
+  structural parameter has_induced_flow::Boolean = false
 
   "Panel reference (planform) area"
   parameter S::Area = 1.0
@@ -169,7 +196,13 @@ relations
   v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
   v_rel_s = MultibodyComponents.resolve2(frame_a.R, v_rel_0)
   u = v_rel_s[1]
-  w = -v_rel_s[2]
+  # Downwash moves the air at the panel downward, which reduces the panel's
+  # downward velocity *through* that air and so reduces its incidence.
+  if has_induced_flow
+    w = -v_rel_s[2] - w_induced
+  else
+    w = -v_rel_s[2]
+  end
 
   # --- regularised incidence ----------------------------------------------
   V = sqrt(u^2 + w^2 + v_eps^2)
@@ -205,6 +238,61 @@ relations
   F_s = [L * sa - D * ca, L * ca + D * sa, 0]
   frame_a.f = -F_s
   frame_a.tau = -[0, 0, q * S * c * CM]
+end
+
+"""
+Downwash velocity behind a lifting surface.
+
+A surface carrying lift leaves the air behind it moving downward, and a
+tailplane sitting in that wake sees a reduced incidence. This is the single
+largest correction to tail effectiveness on a conventional aircraft: it cuts
+the tail's contribution to pitch stiffness by `1 - deps/dalpha`, typically
+15 to 30%.
+
+From lifting line theory the far-field downwash angle of an elliptically
+loaded wing is `eps = 2*CL/(pi*AR)`, so the downwash *velocity* is
+
+    w = eps*V = 4*L/(pi*rho*V*b^2)
+
+taking `AR*S = b^2`. The tail arm here is several chords, so the far-field
+value is the right one; a tail close behind the wing would see about half of
+it, which is what `k` is for.
+
+Expressed in terms of the upstream surface's lift rather than its lift
+coefficient, this needs no knowledge of that surface's incidence or area, and
+it keeps working through the stall --- when the wing drops its lift, the
+downwash drops with it and the tail's incidence jumps, which is exactly the
+nose-down pitch the real aircraft produces.
+
+`frame_a` is a pure sensor, used only to measure the flight speed; it exerts
+no force. Airspeed appears in a denominator and is clamped with `v_eps`.
+"""
+component Downwash
+  "Sensor frame, used only for the flight speed; exerts no force"
+  frame_a = Frame3D()
+  "Density and wind"
+  air = AirState()
+  "Lift of the upstream surface"
+  L_up = RealInput()
+  "Downwash velocity at the downstream surface, positive downward"
+  w_dw = RealOutput()
+
+  "Span of the upstream surface"
+  parameter b::Length = 15.0
+  "Fraction of the far-field downwash seen; 1 for a tail several chords behind"
+  parameter k::Real = 1.0
+  "Speed below which the downwash is faded out"
+  parameter v_eps::Velocity = 1.0
+
+  "Flight speed through the air mass"
+  variable V::Velocity
+relations
+  frame_a.f = [0, 0, 0]
+  frame_a.tau = [0, 0, 0]
+  V = sqrt((der(frame_a.r_0[1]) - air.v_wind_x)^2
+           + (der(frame_a.r_0[2]) - air.v_wind_y)^2
+           + (der(frame_a.r_0[3]) - air.v_wind_z)^2 + v_eps^2)
+  w_dw = k * 4 * L_up / (3.141592653589793 * air.rho * V * b^2)
 end
 
 """

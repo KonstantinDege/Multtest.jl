@@ -32,13 +32,53 @@ component Glider
   air = AirState()
   "Elevator deflection, positive trailing edge down, which pitches the nose down"
   elevator = RealInput() if has_htail
+  "Rudder deflection, positive trailing edge to the right, which yaws the nose left"
+  rudder = RealInput() if has_vtail
+  "Aileron deflection, positive rolls the aircraft to the right (right wing down)"
+  aileron = RealInput()
   fuselage = MultibodyComponents.Body(m = m_fuselage, r_cm = r_cm_fuselage, I_11 = I_fus_roll, I_22 = I_fus_yaw, I_33 = I_fus_pitch, orientation_state = MultibodyComponents.OrientationState.Quaternion(), statePriority = 1000, linearStatePriority = 1000, initialize_orientation = false, r_0(initial = r_start), v_0(initial = v_start), Q_hat(initial = q_start))
-  wing = Wing(b = b_wing, S = S_wing, x_ac = x_ac_wing, y_ac = y_ac_wing, dihedral = dihedral_wing, incidence = incidence_wing, m = m_wing, CL0 = 0.25, CL_alpha = 5.7, CD0 = 0.008, CM0 = -0.09, e_oswald = 0.95, alpha_stall = 0.244)
+  wing = Wing(has_control = true, b = b_wing, S = S_wing, x_ac = x_ac_wing, y_ac = y_ac_wing, dihedral = dihedral_wing, incidence = incidence_wing, m = m_wing, CL0 = 0.25, CL_alpha = 5.7, CD0 = 0.008, CM0 = -0.09, e_oswald = 0.95, alpha_stall = 0.244, CL_delta = CL_delta_ail, CM_delta = -0.45, CD_delta = CD_delta_ail)
+  """
+  Ailerons act differentially, so the right panel takes the negated command.
+  Positive `aileron` puts the left trailing edge down and the right up, which
+  lifts the left wing and rolls the aircraft to the right.
+  """
+  ail_invert = BlockComponents.Math.Gain(k = -1.0)
   fus_mount = MultibodyComponents.FixedTranslation(r = [x_cp_fuselage, 0.0, 0.0], render = false)
+  fus_vis = MultibodyComponents.CylinderVisualizer(render = render, color = [0.93, 0.93, 0.95, 1.0], radius = radius_fuselage * 1.0, length = l_fuselage * 1.0, length_direction = [-1.0, 0.0, 0.0], r_shape = [x_cp_fuselage + 0.25 * l_fuselage, 0.0, 0.0])
+  """
+  The fin is the same `Wing` component as the tailplane, single panel, mounted
+  through a +90 degree roll. In the rolled frame the surface's span axis points
+  down, so its panel (which sits at -y_panel along the local span) ends up
+  above the fuselage, and the surface's lift direction points to the right.
+  Its incidence angle is therefore the sideslip angle and its lift is a side
+  force, with no change to the panel model at all.
+
+  The root offset has to be applied *before* the roll, in body axes, which is
+  why it lives in `vtail_mount` rather than in the surface's own `x_ac`/`y_ac`.
+  """
+  vtail_mount = MultibodyComponents.FixedTranslation(r = [x_ac_vtail, y_ac_vtail, 0.0], render = false) if has_vtail
+  vtail_roll = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = 1.5707963267948966, render = false) if has_vtail
+  vtail = Wing(has_control = true, mirror_right = false, b = b_vtail, S = S_vtail, x_ac = 0.0, y_ac = 0.0, dihedral = 0.0, incidence = 0.0, m = m_vtail, I_panel = 1.0, CL0 = 0.0, CL_alpha = CL_alpha_vtail, CD0 = 0.009, CM0 = 0.0, e_oswald = 0.8, alpha_stall = alpha_stall_vtail, CL_delta = CL_delta_rud, CM_delta = -0.4, CD_delta = 0.02) if has_vtail
   fus_drag = DragBody(CdA_x = CdA_fus_x, CdA_y = CdA_fus_y, CdA_z = CdA_fus_z)
-  htail = Wing(has_control = true, b = b_htail, S = S_htail, x_ac = x_ac_htail, y_ac = y_ac_htail, dihedral = 0.0, incidence = incidence_htail, m = m_htail, I_panel = 2.0, CL0 = 0.0, CL_alpha = 4.4, CD0 = 0.008, CM0 = 0.0, e_oswald = 0.85, alpha_stall = 0.244, CL_delta = CL_delta_elev, CM_delta = -0.55, CD_delta = 0.02) if has_htail
+  """
+  The tailplane sits in the wing's wake. Driving it from the wing's *lift*
+  rather than from a fixed `deps/dalpha` means the reduction in tail
+  effectiveness follows the wing through the stall as well as in the linear
+  range, and costs nothing extra to state.
+  """
+  downwash = Downwash(b = b_wing, k = k_downwash) if has_htail and has_downwash
+  htail = Wing(has_induced_flow = has_downwash, has_control = true, b = b_htail, S = S_htail, x_ac = x_ac_htail, y_ac = y_ac_htail, dihedral = 0.0, incidence = incidence_htail, m = m_htail, I_panel = 2.0, CL0 = 0.0, CL_alpha = 4.4, CD0 = 0.008, CM0 = 0.0, e_oswald = 0.85, alpha_stall = 0.244, CL_delta = CL_delta_elev, CM_delta = -0.55, CD_delta = 0.02) if has_htail
   "Fit a horizontal tail; false leaves the aircraft pitch unstable on purpose"
   structural parameter has_htail::Boolean = true
+  "Fit a fin; false leaves the aircraft directionally unstable on purpose"
+  structural parameter has_vtail::Boolean = true
+  "Put the tailplane in the wing's downwash; false over-states the tail's effectiveness"
+  structural parameter has_downwash::Boolean = true
+  "Fraction of the far-field downwash the tailplane sees"
+  parameter k_downwash::Real = 1.0
+  "Draw the aircraft"
+  parameter render::Boolean = true
   # --- fuselage -------------------------------------------------------------
   "Mass of the fuselage, including the pilot and everything not in a surface"
   parameter m_fuselage::Mass = 230.0
@@ -59,16 +99,33 @@ component Glider
   "Airspeed at release"
   parameter V_start::Velocity = 25.0
   "Flight path angle at release, negative descending"
-  parameter gamma_start::Angle = -0.0235
+  parameter gamma_start::Angle = -0.030476
   "Pitch attitude at release, positive nose up"
-  parameter theta_start::Angle = 0.0257
+  parameter theta_start::Angle = 0.019560
+  "Sideslip at release, positive with the relative wind from the right"
+  parameter beta_start::Angle = 0.0
+  "Bank angle at release, positive right wing down"
+  parameter phi_start::Angle = 0.0
 
-  "Initial velocity of the datum, world frame"
+  """
+  Initial velocity of the datum, world frame. Sideslip enters as a lateral
+  velocity component with the attitude unchanged, which is what sideslip is;
+  the magnitude stays `V_start` for any `beta_start`.
+  """
   final parameter v_start::Velocity[3] =
-      [V_start * cos(gamma_start), V_start * sin(gamma_start), 0.0]
-  "Initial attitude quaternion [w,i,j,k]; pitch is a rotation about the body z axis"
+      [V_start * cos(gamma_start) * cos(beta_start),
+       V_start * sin(gamma_start),
+       V_start * cos(gamma_start) * sin(beta_start)]
+  """
+  Initial attitude quaternion [w,i,j,k]. Pitch is a rotation about the body z
+  axis and bank a rotation about the body x axis; this is the Hamilton product
+  `q_pitch * q_roll`, so the bank is applied in the pitched body frame.
+  """
   final parameter q_start::Real[4] =
-      [cos(theta_start / 2), 0.0, 0.0, sin(theta_start / 2)]
+      [cos(theta_start / 2) * cos(phi_start / 2),
+       cos(theta_start / 2) * sin(phi_start / 2),
+       sin(theta_start / 2) * sin(phi_start / 2),
+       sin(theta_start / 2) * cos(phi_start / 2)]
   # --- wing -----------------------------------------------------------------
   "Wing span"
   parameter b_wing::Length = 15.0
@@ -78,10 +135,15 @@ component Glider
   Wing aerodynamic centre ahead of the centre of gravity. This is the static
   margin knob: because the datum is the centre of gravity, moving the wing
   aerodynamic centre forward is the same as moving the centre of gravity aft,
-  and the neutral point follows at about 0.9 times the change. Trimmed at
-  0.205 m the aircraft sits near 18% MAC, in the usual sailplane band.
+  and the neutral point follows at about 0.9 times the change.
+
+  0.145 m puts the aircraft at 15% MAC, in the usual sailplane band. Note this
+  had to move forward from 0.205 when downwash was switched on: downwash cuts
+  the tail's contribution by 17%, but the *net* `Mw` is a small difference of a
+  destabilising wing term and a stabilising tail term, so a 17% cut to the tail
+  took the static margin from 14% down to 8%.
   """
-  parameter x_ac_wing::Length = 0.205
+  parameter x_ac_wing::Length = 0.145
   "Wing aerodynamic centre above the centre of gravity"
   parameter y_ac_wing::Length = 0.0
   "Wing dihedral"
@@ -90,6 +152,29 @@ component Glider
   parameter incidence_wing::Angle = 0.05236
   "Wing mass"
   parameter m_wing::Mass = 100.0
+  """
+  Lift coefficient per radian of aileron, as seen by the whole semi-span panel.
+
+  This is a *lumped equivalent*, not a section value, and it has to be because
+  there is one panel per semi-span while a real aileron covers only its outer
+  part. It is set so the panel produces the correct rolling moment: for an
+  aileron running from 0.50 to 0.95 semi-span with an effectiveness of 0.5,
+
+      dL_roll/d(delta) = 2*q*a*tau*integral(c*y dy) = 73.2*q
+
+  and the single panel gives `2*q*S_panel*CL_delta*y_panel = 45.5*q*CL_delta`,
+  hence 1.61.
+
+  Two consequences worth knowing. The panel's own lift coefficient swings less
+  than the real aileron strip's does, so this under-predicts tip stall at large
+  deflection. And the induced-drag asymmetry that causes adverse yaw acts at
+  `y_panel` rather than at the aileron's own centroid further out, so the
+  adverse yaw is low by roughly 20%. Both are fixed by raising the panel count,
+  not by adjusting this number.
+  """
+  parameter CL_delta_ail::Real = 1.611
+  "Wing drag coefficient per radian squared of aileron deflection"
+  parameter CD_delta_ail::Real = 0.05
   # --- horizontal tail ------------------------------------------------------
   "Tailplane span"
   parameter b_htail::Length = 2.2
@@ -101,17 +186,52 @@ component Glider
   parameter y_ac_htail::Length = 0.25
   """
   Tailplane incidence relative to the fuselage datum. This is the rigging
-  angle that sets the trim speed: the wing's camber moment `CM0` is
-  nose-down and has to be balanced by a download on the tail, so the
-  tailplane is set at a negative incidence. With it at zero the aircraft
-  still trims, but at a useless incidence of about -2 degrees, and dives
-  away at 90 m/s.
+  angle that sets the trim speed, and it is what the elevator would otherwise
+  have to hold: rig it so the elevator sits near zero at the best glide speed,
+  or the aircraft cruises with the stick permanently displaced.
+
+  It is set here for a centre of gravity at 15% MAC with downwash active. The
+  tailplane carries only a small load at trim, so the incidence is close to
+  zero. Move `x_ac_wing`, or switch downwash off, and this has to be re-rigged
+  with it.
   """
-  parameter incidence_htail::Angle = -0.037373
+  parameter incidence_htail::Angle = 0.007662
   "Tailplane mass"
   parameter m_htail::Mass = 12.0
   "Tailplane lift coefficient per radian of elevator deflection"
   parameter CL_delta_elev::Real = 2.2
+
+  # --- vertical tail --------------------------------------------------------
+  "Fin height above its root"
+  parameter b_vtail::Length = 1.2
+  "Fin area"
+  parameter S_vtail::Area = 0.8
+  "Fin aerodynamic centre ahead of the centre of gravity; negative is aft"
+  parameter x_ac_vtail::Length = -3.8
+  "Fin root above the centre of gravity"
+  parameter y_ac_vtail::Length = 0.3
+  "Fin mass"
+  parameter m_vtail::Mass = 8.0
+  """
+  Fin lift curve slope per radian.
+
+  Well below the wing's because the fin's geometric aspect ratio is only 1.8,
+  but above the plain `2*pi*AR/(AR+2)` that geometry alone would give: the
+  fuselage acts as an endplate at the root and the tailplane partly does the
+  same at the top, so the *effective* aspect ratio is roughly 1.5 to 2 times
+  geometric. At 3.0 the aircraft's `C_n_beta` came out at 0.039, below the
+  0.05 to 0.10 that sailplanes normally show; 3.8 puts it at 0.054.
+  """
+  parameter CL_alpha_vtail::Real = 3.8
+  """
+  Incidence at which the fin's flow separates. Low aspect ratio surfaces hold
+  on well past the angle a high aspect ratio wing stalls at, so this sits at
+  20 degrees rather than the wing's 14. It matters: once sideslip exceeds it
+  the fin stops restoring and the spiral departs with nothing to arrest it.
+  """
+  parameter alpha_stall_vtail::Angle = 0.35
+  "Fin side force coefficient per radian of rudder deflection"
+  parameter CL_delta_rud::Real = 1.5
 
   # --- fuselage aerodynamics ------------------------------------------------
   """
@@ -122,6 +242,21 @@ component Glider
   pitch and yaw, so the station matters more than the drag areas do.
   """
   parameter x_cp_fuselage::Length = 0.225
+  """
+  Fuselage length, nose to tail. Only drawn, not used aerodynamically. The
+  drawn body is placed so its nose sits a quarter of the body length ahead of
+  `x_cp_fuselage` --- the same slender-body assumption that station rests on,
+  so the picture and the aerodynamic model cannot drift apart.
+
+  Note the shape dimensions must be passed as *expressions* rather than as bare
+  parameter symbols. The visualizers declare `length`, `width` and `r_shape` as
+  time-dependent variables, so binding one to a bare parameter puts that
+  parameter and a variable in the same alias set, and anything else deriving a
+  parameter from it then fails with "could not evaluate value of parameter".
+  """
+  parameter l_fuselage::Length = 6.3
+  "Fuselage radius, for drawing"
+  parameter radius_fuselage::Length = 0.32
   "Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider"
   parameter CdA_fus_x::Area = 0.05
   "Fuselage normal drag area Cd*S, from the plan area and a slender-body cross-flow Cd"
@@ -134,23 +269,42 @@ component Glider
   final parameter y_cm_wing::Length = y_ac_wing + y_panel_wing * sin(dihedral_wing)
   "Mass of the tailplane actually fitted"
   final parameter m_htail_fitted::Mass = ifelse(has_htail, m_htail, 0.0)
+  "Mass of the fin actually fitted"
+  final parameter m_vtail_fitted::Mass = ifelse(has_vtail, m_vtail, 0.0)
+  "Height of the fin mass above the datum"
+  final parameter y_cm_vtail::Length = y_ac_vtail + b_vtail / (2 * sqrt(3.0))
   "Total aircraft mass"
-  final parameter m_total::Mass = m_fuselage + m_wing + m_htail_fitted
+  final parameter m_total::Mass = m_fuselage + m_wing + m_htail_fitted + m_vtail_fitted
   """
   Fuselage centre of mass relative to the datum, chosen so that the
   composite centre of gravity of the aircraft lands on the datum.
   """
-  final parameter r_cm_fuselage::Position[3] = -(m_wing * [x_ac_wing, y_cm_wing, 0.0] + m_htail_fitted * [x_ac_htail, y_ac_htail, 0.0]) / m_fuselage
+  final parameter r_cm_fuselage::Position[3] = -(m_wing * [x_ac_wing, y_cm_wing, 0.0] + m_htail_fitted * [x_ac_htail, y_ac_htail, 0.0] + m_vtail_fitted * [x_ac_vtail, y_cm_vtail, 0.0]) / m_fuselage
 relations
   connect(fuselage.frame_a, wing.frame_a)
   connect(air, wing.air)
-  connect(fuselage.frame_a, fus_mount.frame_a)
+  connect(aileron, wing.delta_l, ail_invert.u)
+  connect(ail_invert.y, wing.delta_r)
+  connect(fuselage.frame_a, fus_mount.frame_a, fus_vis.frame_a)
   connect(fus_mount.frame_b, fus_drag.frame_a)
   connect(air, fus_drag.air)
   if has_htail
     connect(fuselage.frame_a, htail.frame_a)
     connect(air, htail.air)
     connect(elevator, htail.delta_l, htail.delta_r)
+    if has_downwash
+      connect(fuselage.frame_a, downwash.frame_a)
+      connect(air, downwash.air)
+      connect(wing.L_total, downwash.L_up)
+      connect(downwash.w_dw, htail.w_induced)
+    end
+  end
+  if has_vtail
+    connect(fuselage.frame_a, vtail_mount.frame_a)
+    connect(vtail_mount.frame_b, vtail_roll.frame_a)
+    connect(vtail_roll.frame_b, vtail.frame_a)
+    connect(air, vtail.air)
+    connect(rudder, vtail.delta_l)
   end
 end
 
@@ -166,25 +320,78 @@ some artefact of the assembly.
 test component TestGliderWingOnly
   world = MultibodyComponents.World()
   atm = Atmosphere(rho0 = 1.225)
-  glider = Glider(has_htail = false)
+  glider = Glider(has_htail = false, has_vtail = false)
+  ail = BlockComponents.Sources.Constant(k = 0.0)
 relations
   connect(atm.air, glider.air)
+  connect(ail.y, glider.aileron)
 end
 
 """
-Free flight with wing and tailplane, released level with the elevator
-neutral.
+Wing and tailplane but no fin, released at the longitudinal trim.
 
-The aircraft now has pitch stiffness, so instead of departing it should
-converge onto a glide, oscillating on the way in the slow, lightly damped
-phugoid mode whose period is close to `pi*sqrt(2)*V/g`.
+Pitch is now stable, but with nothing to weathercock the aircraft there is no
+yaw stiffness worth the name, and the lateral modes are divergent. Kept as the
+counterpart to `TestGliderWingOnly`: it shows what the fin is responsible for.
 """
-test component TestGliderTailed
+test component TestGliderNoFin
+  world = MultibodyComponents.World()
+  atm = Atmosphere(rho0 = 1.225)
+  glider = Glider(has_vtail = false)
+  elev = BlockComponents.Sources.Constant(k = 0.0)
+  ail = BlockComponents.Sources.Constant(k = 0.0)
+relations
+  connect(atm.air, glider.air)
+  connect(elev.y, glider.elevator)
+  connect(ail.y, glider.aileron)
+end
+
+"""
+The complete glider, released at the longitudinal trim with the controls
+centred.
+
+Trim, the glide polar and the longitudinal and lateral modes are all found
+from this harness with the helpers in `src/flightdynamics.jl`, which solve for
+the steady glide directly rather than simulating and waiting to settle.
+"""
+test component TestGlider
   world = MultibodyComponents.World()
   atm = Atmosphere(rho0 = 1.225)
   glider = Glider()
   elev = BlockComponents.Sources.Constant(k = 0.0)
+  rud = BlockComponents.Sources.Constant(k = 0.0)
+  ail = BlockComponents.Sources.Constant(k = 0.0)
 relations
   connect(atm.air, glider.air)
   connect(elev.y, glider.elevator)
+  connect(rud.y, glider.rudder)
+  connect(ail.y, glider.aileron)
+end
+
+"""
+Aileron step from the longitudinal trim.
+
+The steady roll rate is the balance of the aileron rolling moment against the
+roll damping, `p = -L_delta*delta/L_p`. Roll damping was validated against the
+handbook to 0.3% and comes purely from where the panels sit, so the roll rate
+is a genuine prediction of the two together rather than something fitted.
+
+Watch the yaw as well: the up-going wing carries more induced drag, so the
+aircraft yaws *away* from the turn before the fin catches it. That adverse yaw
+is not supplied as a derivative either --- it falls out of the panels having
+their own drag.
+"""
+test component TestGliderAileronStep
+  world = MultibodyComponents.World()
+  atm = Atmosphere(rho0 = 1.225)
+  glider = Glider()
+  elev = BlockComponents.Sources.Constant(k = 0.0)
+  rud = BlockComponents.Sources.Constant(k = 0.0)
+  "Aileron step, applied after one second"
+  ail = BlockComponents.Sources.Step(height = 0.15, start_time = 1.0, offset = 0.0)
+relations
+  connect(atm.air, glider.air)
+  connect(elev.y, glider.elevator)
+  connect(rud.y, glider.rudder)
+  connect(ail.y, glider.aileron)
 end

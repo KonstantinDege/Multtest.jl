@@ -48,16 +48,25 @@ component Wing
   dih_l = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = dihedral, render = false)
   span_l = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, -y_panel], render = false)
   inc_l = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false)
-  panel_l = AeroSurface(has_control = has_control, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta)
+  panel_l = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta)
   mass_l = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false)
+  vis_l = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, y_panel - ifelse(mirror_right, b / 4, b / 2)])
   # --- right panel ---------------------------------------------------------
   dih_r = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = -dihedral, render = false) if mirror_right
   span_r = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, y_panel], render = false) if mirror_right
   inc_r = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false) if mirror_right
-  panel_r = AeroSurface(has_control = has_control, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) if mirror_right
+  panel_r = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) if mirror_right
   mass_r = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false) if mirror_right
+  vis_r = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, b / 4 - y_panel]) if mirror_right
+  "Downwash velocity at this surface, positive downward; fanned out to both panels"
+  w_induced = RealInput() if has_induced_flow
+  "Total lift of the surface, for driving the downwash on anything behind it"
+  L_total = RealOutput()
+
   "Give the panels control surface deflection inputs"
   structural parameter has_control::Boolean = false
+  "Take an induced-flow input, for a surface sitting in another's wake"
+  structural parameter has_induced_flow::Boolean = false
   "Build the right panel; set false for a single-panel surface such as a fin"
   structural parameter mirror_right::Boolean = true
   "Span, tip to tip"
@@ -96,6 +105,13 @@ component Wing
   parameter CM_delta::Real = 0.0
   "Drag coefficient per radian squared of control deflection"
   parameter CD_delta::Real = 0.0
+  "Draw the surface"
+  parameter render::Boolean = true
+  "RGBA colour of the drawn surface"
+  parameter color::Real[4] = [0.88, 0.88, 0.91, 1.0]
+  "Thickness of the drawn surface as a fraction of chord"
+  parameter thickness_ratio::Real = 0.12
+
   "Spanwise station of the panels, measured from the root along the span"
   parameter y_panel::Length = b / (2 * sqrt(3.0))
   "Aspect ratio of the surface"
@@ -106,13 +122,23 @@ component Wing
   final parameter S_panel::Area = ifelse(mirror_right, S / 2, S)
   "Mass carried by each panel"
   final parameter m_panel::Mass = ifelse(mirror_right, m / 2, m)
+  """
+  Spanwise extent drawn per panel: a semi-span for a mirrored surface, the
+  whole span for a single-panel one such as a fin. The drawn box runs from the
+  root out to the tip, which is why its origin is offset from the panel frame
+  --- the panel sits at `y_panel`, not at the middle of what it represents.
+  """
+  final parameter span_extent::Length = ifelse(mirror_right, b / 2, b)
 relations
   connect(frame_a, root.frame_a)
   connect(root.frame_b, dih_l.frame_a)
   connect(dih_l.frame_b, span_l.frame_a)
   connect(span_l.frame_b, inc_l.frame_a)
-  connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a)
+  connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a, vis_l.frame_a)
   connect(air, panel_l.air)
+  if has_induced_flow
+    connect(w_induced, panel_l.w_induced)
+  end
   if has_control
     connect(delta_l, panel_l.delta)
   end
@@ -120,10 +146,16 @@ relations
     connect(root.frame_b, dih_r.frame_a)
     connect(dih_r.frame_b, span_r.frame_a)
     connect(span_r.frame_b, inc_r.frame_a)
-    connect(inc_r.frame_b, panel_r.frame_a, mass_r.frame_a)
+    connect(inc_r.frame_b, panel_r.frame_a, mass_r.frame_a, vis_r.frame_a)
     connect(air, panel_r.air)
+    if has_induced_flow
+      connect(w_induced, panel_r.w_induced)
+    end
     if has_control
       connect(delta_r, panel_r.delta)
     end
+    L_total = panel_l.L + panel_r.L
+  else
+    L_total = panel_l.L
   end
 end

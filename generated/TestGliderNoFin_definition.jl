@@ -5,21 +5,20 @@
 
 
 @doc Markdown.doc"""
-   TestGliderTailed(; name)
+   TestGliderNoFin(; name)
 
-Free flight with wing and tailplane, released level with the elevator
-neutral.
+Wing and tailplane but no fin, released at the longitudinal trim.
 
-The aircraft now has pitch stiffness, so instead of departing it should
-converge onto a glide, oscillating on the way in the slow, lightly damped
-phugoid mode whose period is close to `pi*sqrt(2)*V/g`.
+Pitch is now stable, but with nothing to weathercock the aircraft there is no
+yaw stiffness worth the name, and the lateral modes are divergent. Kept as the
+counterpart to `TestGliderWingOnly`: it shows what the fin is responsible for.
 """
-@component function TestGliderTailed(; name = nothing, kwargs...)
+@component function TestGliderNoFin(; name = nothing, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
   
-    @named model = TestGliderTailed()
+    @named model = TestGliderNoFin()
   """))
 
   __overrides = __build_overrides(kwargs)
@@ -66,10 +65,13 @@ phugoid mode whose period is close to `pi*sqrt(2)*V/g`.
   push!(__systems, @named atm = Multtest.Atmosphere(; rho0=1.225, atm_overrides...))
   # Subcomponent glider of type Multtest.Glider
   glider_overrides = __pop_subcomponent_overrides!(__overrides, "glider")
-  push!(__systems, @named glider = Multtest.Glider(; glider_overrides...))
+  push!(__systems, @named glider = Multtest.Glider(; has_vtail=false, glider_overrides...))
   # Subcomponent elev of type BlockComponents.Sources.Constant
   elev_overrides = __pop_subcomponent_overrides!(__overrides, "elev")
   push!(__systems, @named elev = BlockComponents.Sources.Constant(; k=Float64(0.0), elev_overrides...))
+  # Subcomponent ail of type BlockComponents.Sources.Constant
+  ail_overrides = __pop_subcomponent_overrides!(__overrides, "ail")
+  push!(__systems, @named ail = BlockComponents.Sources.Constant(; k=Float64(0.0), ail_overrides...))
 
   ### Check there are no unmatched overrides
   isempty(__overrides) || throw(ArgumentError("overrides: [$(join(keys(__overrides), ", "))] don't match names found in model. These names may exist in the model but could have been conditionally excluded."))
@@ -84,8 +86,9 @@ phugoid mode whose period is close to `pi*sqrt(2)*V/g`.
   ### Equations
   push!(__eqs, connect(atm.air, glider.air))
   push!(__eqs, connect(elev.y, glider.elevator))
+  push!(__eqs, connect(ail.y, glider.aileron))
 
   # Return completely constructed System
   return System(__eqs, t, __vars, __params; systems=__systems, initial_conditions=__initial_conditions, guesses=__guesses, name, initialization_eqs=__initialization_eqs, bindings=__bindings, assertions=__assertions)
 end
-export TestGliderTailed
+export TestGliderNoFin

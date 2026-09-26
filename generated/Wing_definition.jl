@@ -5,7 +5,7 @@
 
 
 @doc Markdown.doc"""
-   Wing(; name, has_control, mirror_right, b, S, x_ac, y_ac, dihedral, incidence, m, I_panel, CL0, CL_alpha, CD0, CM0, e_oswald, alpha_stall, M_stall, CL_delta, CM_delta, CD_delta, y_panel)
+   Wing(; name, has_control, has_induced_flow, mirror_right, b, S, x_ac, y_ac, dihedral, incidence, m, I_panel, CL0, CL_alpha, CD0, CM0, e_oswald, alpha_stall, M_stall, CL_delta, CM_delta, CD_delta, render, color, thickness_ratio, y_panel)
 
 A lifting surface made of a left and a right panel, with its mass.
 
@@ -46,6 +46,7 @@ sideslip angle and its lift becomes a side force.
 | Name         | Description                         | Units  |   Default value |
 | ------------ | ----------------------------------- | ------ | --------------- |
 | `has_control`         | Give the panels control surface deflection inputs                         | --  |   false |
+| `has_induced_flow`         | Take an induced-flow input, for a surface sitting in another's wake                         | --  |   false |
 | `mirror_right`         | Build the right panel; set false for a single-panel surface such as a fin                         | --  |   true |
 | `b`         | Span, tip to tip                         | m  |   15.0 |
 | `S`         | Reference (planform) area of the whole surface                         | m2  |   10.5 |
@@ -65,6 +66,9 @@ sideslip angle and its lift becomes a side force.
 | `CL_delta`         | Lift coefficient per radian of control deflection                         | --  |   0.0 |
 | `CM_delta`         | Pitching moment coefficient per radian of control deflection                         | --  |   0.0 |
 | `CD_delta`         | Drag coefficient per radian squared of control deflection                         | --  |   0.0 |
+| `render`         | Draw the surface                         | --  |   true |
+| `color`         | RGBA colour of the drawn surface                         | --  |   [0.88, 0.88, 0.91, 1.0] |
+| `thickness_ratio`         | Thickness of the drawn surface as a fraction of chord                         | --  |   0.12 |
 | `y_panel`         | Spanwise station of the panels, measured from the root along the span                         | m  |   b / (2 * sqrt(3.0)) |
 
 ## Connectors
@@ -81,8 +85,10 @@ broadcast and adds no force or mass balance of its own.
 The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
  * `delta_l` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `delta_r` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `w_induced` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `L_total` - This connector represents a real signal as an output from a component ([`RealOutput`](@ref))
 """
-@component function Wing(; name = nothing, has_control=false, mirror_right=true, b=Float64(15.0), S=10.5, x_ac=0.1, y_ac=Float64(0.0), dihedral=Float64(0.0), incidence=Float64(0.0), m=Float64(100.0), I_panel=Float64(5.0), CL0=0.25, CL_alpha=5.7, CD0=0.008, CM0=-0.09, e_oswald=0.95, alpha_stall=0.244, M_stall=Float64(25.0), CL_delta=Float64(0.0), CM_delta=Float64(0.0), CD_delta=Float64(0.0), y_panel=b / (2 * sqrt(3.0)), kwargs...)
+@component function Wing(; name = nothing, has_control=false, has_induced_flow=false, mirror_right=true, b=Float64(15.0), S=10.5, x_ac=0.1, y_ac=Float64(0.0), dihedral=Float64(0.0), incidence=Float64(0.0), m=Float64(100.0), I_panel=Float64(5.0), CL0=0.25, CL_alpha=5.7, CD0=0.008, CM0=-0.09, e_oswald=0.95, alpha_stall=0.244, M_stall=Float64(25.0), CL_delta=Float64(0.0), CM_delta=Float64(0.0), CD_delta=Float64(0.0), render=true, color=[0.88, 0.88, 0.91, Float64(1.0)], thickness_ratio=0.12, y_panel=b / (2 * sqrt(3.0)), kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
@@ -113,6 +119,10 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   append!(__params, @parameters (c_bar::Real), [description = "Mean aerodynamic chord", misc = "final"])
   append!(__params, @parameters (S_panel::Real), [description = "Area carried by each panel", misc = "final"])
   append!(__params, @parameters (m_panel::Real), [description = "Mass carried by each panel", bounds = (0, Inf), misc = "final"])
+  append!(__params, @parameters (span_extent::Real), [description = "Spanwise extent drawn per panel: a semi-span for a mirrored surface, the
+  append!(__params, @parameters (span_extent::Real), [description = whole span for a single-panel one such as a fin. The drawn box runs from the
+  append!(__params, @parameters (span_extent::Real), [description = root out to the tip, which is why its origin is offset from the panel frame
+  append!(__params, @parameters (span_extent::Real), [description = --- the panel sits at `y_panel`, not at the middle of what it represents.", misc = "final"])
 
   ### Deferred assignment (default values that depend on final parameters)
 
@@ -171,6 +181,15 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__CD_delta = CD_delta
   append!(__params, @parameters (CD_delta::Real), [description = "Drag coefficient per radian squared of control deflection"])
   __initial_conditions[CD_delta] = __local__CD_delta
+  __local__render = render
+  append!(__params, @parameters (render::Bool), [description = "Draw the surface"])
+  __initial_conditions[render] = __local__render
+  __local__color = color
+  append!(__params, @parameters (color[1:4]::Real), [description = "RGBA colour of the drawn surface"])
+  __initial_conditions[color] = __local__color
+  __local__thickness_ratio = thickness_ratio
+  append!(__params, @parameters (thickness_ratio::Real), [description = "Thickness of the drawn surface as a fraction of chord"])
+  __initial_conditions[thickness_ratio] = __local__thickness_ratio
   __local__y_panel = y_panel
   append!(__params, @parameters (y_panel::Real), [description = "Spanwise station of the panels, measured from the root along the span"])
   __initial_conditions[y_panel] = __local__y_panel
@@ -180,10 +199,13 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __bindings[c_bar] = S / b
   __bindings[S_panel] = ifelse(mirror_right, S / 2, S)
   __bindings[m_panel] = ifelse(mirror_right, m / 2, m)
+  __bindings[span_extent] = ifelse(mirror_right, b / 2, b)
 
   ### Final Path Parameters
   append!(__vars, @variables (delta_l(t)::Real), [input = true])
   append!(__vars, @variables (delta_r(t)::Real), [input = true])
+  append!(__vars, @variables (w_induced(t)::Real), [input = true])
+  append!(__vars, @variables (L_total(t)::Real), [output = true])
 
   ### Variables (declarations)
 
@@ -209,10 +231,13 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__systems, @named inc_l = MultibodyComponents.FixedRotation(; n=[Float64(0.0), Float64(0.0), Float64(1.0)], angle=incidence, render=false, inc_l_overrides...))
   # Subcomponent panel_l of type Multtest.AeroSurface
   panel_l_overrides = __pop_subcomponent_overrides!(__overrides, "panel_l")
-  push!(__systems, @named panel_l = Multtest.AeroSurface(; has_control=has_control, S=S_panel, c=c_bar, AR=AR, e_oswald=e_oswald, CL0=CL0, CL_alpha=CL_alpha, CD0=CD0, CM0=CM0, alpha_stall=alpha_stall, M_stall=M_stall, CL_delta=CL_delta, CM_delta=CM_delta, CD_delta=CD_delta, panel_l_overrides...))
+  push!(__systems, @named panel_l = Multtest.AeroSurface(; has_control=has_control, has_induced_flow=has_induced_flow, S=S_panel, c=c_bar, AR=AR, e_oswald=e_oswald, CL0=CL0, CL_alpha=CL_alpha, CD0=CD0, CM0=CM0, alpha_stall=alpha_stall, M_stall=M_stall, CL_delta=CL_delta, CM_delta=CM_delta, CD_delta=CD_delta, panel_l_overrides...))
   # Subcomponent mass_l of type MultibodyComponents.Body
   mass_l_overrides = __pop_subcomponent_overrides!(__overrides, "mass_l")
   push!(__systems, @named mass_l = MultibodyComponents.Body(; m=m_panel, I_11=I_panel, I_22=I_panel, I_33=I_panel, render=false, mass_l_overrides...))
+  # Subcomponent vis_l of type MultibodyComponents.BoxVisualizer
+  vis_l_overrides = __pop_subcomponent_overrides!(__overrides, "vis_l")
+  push!(__systems, @named vis_l = MultibodyComponents.BoxVisualizer(; render=render, color=color, length=S / b, length_direction=[1.0, 0.0, 0.0], width=ifelse(mirror_right, b / 2, b), width_direction=[0.0, 0.0, 1.0], height=thickness_ratio * S / b, r_shape=[-0.75 * S / b, 0.0, y_panel - ifelse(mirror_right, b / 4, b / 2)], vis_l_overrides...))
   # Subcomponent dih_r of type MultibodyComponents.FixedRotation
   dih_r_overrides = __pop_subcomponent_overrides!(__overrides, "dih_r")
   if mirror_right
@@ -231,12 +256,17 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   # Subcomponent panel_r of type Multtest.AeroSurface
   panel_r_overrides = __pop_subcomponent_overrides!(__overrides, "panel_r")
   if mirror_right
-    push!(__systems, @named panel_r = Multtest.AeroSurface(; has_control=has_control, S=S_panel, c=c_bar, AR=AR, e_oswald=e_oswald, CL0=CL0, CL_alpha=CL_alpha, CD0=CD0, CM0=CM0, alpha_stall=alpha_stall, M_stall=M_stall, CL_delta=CL_delta, CM_delta=CM_delta, CD_delta=CD_delta, panel_r_overrides...))
+    push!(__systems, @named panel_r = Multtest.AeroSurface(; has_control=has_control, has_induced_flow=has_induced_flow, S=S_panel, c=c_bar, AR=AR, e_oswald=e_oswald, CL0=CL0, CL_alpha=CL_alpha, CD0=CD0, CM0=CM0, alpha_stall=alpha_stall, M_stall=M_stall, CL_delta=CL_delta, CM_delta=CM_delta, CD_delta=CD_delta, panel_r_overrides...))
   end
   # Subcomponent mass_r of type MultibodyComponents.Body
   mass_r_overrides = __pop_subcomponent_overrides!(__overrides, "mass_r")
   if mirror_right
     push!(__systems, @named mass_r = MultibodyComponents.Body(; m=m_panel, I_11=I_panel, I_22=I_panel, I_33=I_panel, render=false, mass_r_overrides...))
+  end
+  # Subcomponent vis_r of type MultibodyComponents.BoxVisualizer
+  vis_r_overrides = __pop_subcomponent_overrides!(__overrides, "vis_r")
+  if mirror_right
+    push!(__systems, @named vis_r = MultibodyComponents.BoxVisualizer(; render=render, color=color, length=S / b, length_direction=[1.0, 0.0, 0.0], width=ifelse(mirror_right, b / 2, b), width_direction=[0.0, 0.0, 1.0], height=thickness_ratio * S / b, r_shape=[-0.75 * S / b, 0.0, b / 4 - y_panel], vis_r_overrides...))
   end
 
   ### Check there are no unmatched overrides
@@ -254,10 +284,14 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__eqs, connect(root.frame_b, dih_l.frame_a))
   push!(__eqs, connect(dih_l.frame_b, span_l.frame_a))
   push!(__eqs, connect(span_l.frame_b, inc_l.frame_a))
-  push!(__eqs, connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a))
+  push!(__eqs, connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a, vis_l.frame_a))
   push!(__eqs, connect(air, panel_l.air))
 
   ### Control Structures
+  if has_induced_flow
+    push!(__eqs, connect(w_induced, panel_l.w_induced))
+  else
+  end
   if has_control
     push!(__eqs, connect(delta_l, panel_l.delta))
   else
@@ -266,13 +300,19 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
     push!(__eqs, connect(root.frame_b, dih_r.frame_a))
     push!(__eqs, connect(dih_r.frame_b, span_r.frame_a))
     push!(__eqs, connect(span_r.frame_b, inc_r.frame_a))
-    push!(__eqs, connect(inc_r.frame_b, panel_r.frame_a, mass_r.frame_a))
+    push!(__eqs, connect(inc_r.frame_b, panel_r.frame_a, mass_r.frame_a, vis_r.frame_a))
     push!(__eqs, connect(air, panel_r.air))
+    if has_induced_flow
+      push!(__eqs, connect(w_induced, panel_r.w_induced))
+    else
+    end
     if has_control
       push!(__eqs, connect(delta_r, panel_r.delta))
     else
     end
+    push!(__eqs, L_total ~ panel_l.L + panel_r.L)
   else
+    push!(__eqs, L_total ~ panel_l.L)
   end
 
   # Return completely constructed System

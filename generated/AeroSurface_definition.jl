@@ -5,7 +5,7 @@
 
 
 @doc Markdown.doc"""
-   AeroSurface(; name, has_control, S, c, AR, e_oswald, CL0, CL_alpha, CD0, CM0, alpha_stall, M_stall, M_rev, CL_delta, CM_delta, CD_delta, v_eps, s_eps)
+   AeroSurface(; name, has_control, has_induced_flow, S, c, AR, e_oswald, CL0, CL_alpha, CD0, CM0, alpha_stall, M_stall, M_rev, CL_delta, CM_delta, CD_delta, v_eps, s_eps)
 
 Quasi-steady aerodynamic panel (one strip of a lifting surface).
 
@@ -52,6 +52,23 @@ Tune `alpha_stall` and `M_stall` together against the section polar you
 are matching --- raising `M_stall` sharpens the stall and moves the peak
 closer to `alpha_stall`.
 
+# Known limitation: no laminar drag bucket
+
+`CD0` is constant, so the only thing raising the profile drag at high lift
+is the separation blend. A real laminar section leaves its low-drag bucket
+well before the stall and its profile drag climbs steeply from there.
+
+The consequence is visible on a glide polar: the minimum sink point still
+comes out as a genuine minimum, because the separation blend does raise the
+drag near the stall, but it sits closer to the stall than it should. For the
+glider in this package minimum sink falls at about 1.06 times the stall
+speed where a real sailplane shows about 1.15. Nothing else in the polar is
+affected --- best glide, which occurs at a much lower lift coefficient, is
+untouched.
+
+Adding the bucket means making `CD0` a function of `CL_att`; it was left out
+rather than guessed, since it needs section data to be worth anything.
+
 # Numerical conditioning
 
 The force is proportional to the *unregularised* dynamic pressure and so
@@ -72,6 +89,7 @@ aerodynamic centre.
 | Name         | Description                         | Units  |   Default value |
 | ------------ | ----------------------------------- | ------ | --------------- |
 | `has_control`         | Give the panel a control surface deflection input                         | --  |   false |
+| `has_induced_flow`         | Give the panel an induced-flow input, for a surface sitting in the wake of another. Downwash is a velocity, not a coefficient correction, so it enters the panel's own flow calculation and the resulting reduction in incidence carries through the lift, the drag and the moment together.                         | --  |   false |
 | `S`         | Panel reference (planform) area                         | m2  |   1.0 |
 | `c`         | Panel mean aerodynamic chord, used for the pitching moment                         | m  |   1.0 |
 | `AR`         | Aspect ratio of the *parent* surface, used for the induced drag of this panel                         | --  |   8.0 |
@@ -102,6 +120,7 @@ broadcast and adds no force or mass balance of its own.
 
 The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
  * `delta` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `w_induced` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
 
 ## Variables
 
@@ -128,7 +147,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 | `F_s`         | Aerodynamic force applied to frame_a, panel frame                         | N  |
 | `d_eff`         | Effective control deflection                         | rad  |
 """
-@component function AeroSurface(; name = nothing, has_control=false, S=Float64(1.0), c=Float64(1.0), AR=Float64(8.0), e_oswald=0.85, CL0=Float64(0.0), CL_alpha=Float64(5.0), CD0=0.01, CM0=Float64(0.0), alpha_stall=0.26, M_stall=Float64(25.0), M_rev=Float64(15.0), CL_delta=Float64(0.0), CM_delta=Float64(0.0), CD_delta=Float64(0.0), v_eps=0.5, s_eps=0.0001, kwargs...)
+@component function AeroSurface(; name = nothing, has_control=false, has_induced_flow=false, S=Float64(1.0), c=Float64(1.0), AR=Float64(8.0), e_oswald=0.85, CL0=Float64(0.0), CL_alpha=Float64(5.0), CD0=0.01, CM0=Float64(0.0), alpha_stall=0.26, M_stall=Float64(25.0), M_rev=Float64(15.0), CL_delta=Float64(0.0), CM_delta=Float64(0.0), CD_delta=Float64(0.0), v_eps=0.5, s_eps=0.0001, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
@@ -212,6 +231,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 
   ### Final Path Parameters
   append!(__vars, @variables (delta(t)::Real), [input = true])
+  append!(__vars, @variables (w_induced(t)::Real), [input = true])
 
   ### Variables (declarations)
   append!(__vars, @variables (v_rel_0(t)[1:3]::Real), [description = "Velocity of the panel relative to the air mass, world frame"])
@@ -338,7 +358,6 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__eqs, v_rel_0 ~ ModelingToolkit.D_nounits(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z])
   push!(__eqs, v_rel_s ~ MultibodyComponents.resolve2(frame_a.R, v_rel_0))
   push!(__eqs, u ~ v_rel_s[1])
-  push!(__eqs, w ~ -v_rel_s[2])
   push!(__eqs, V ~ sqrt(u ^ 2 + w ^ 2 + v_eps ^ 2))
   push!(__eqs, sa ~ w / V)
   push!(__eqs, ca ~ u / V)
@@ -358,6 +377,11 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__eqs, frame_a.tau ~ -[0, 0, q * S * c * CM])
 
   ### Control Structures
+  if has_induced_flow
+    push!(__eqs, w ~ -v_rel_s[2] - w_induced)
+  else
+    push!(__eqs, w ~ -v_rel_s[2])
+  end
   if has_control
     push!(__eqs, d_eff ~ delta)
   else

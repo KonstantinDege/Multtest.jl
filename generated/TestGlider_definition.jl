@@ -5,22 +5,21 @@
 
 
 @doc Markdown.doc"""
-   TestGliderWingOnly(; name)
+   TestGlider(; name)
 
-Free flight with the wing only, released level.
+The complete glider, released at the longitudinal trim with the controls
+centred.
 
-With no tailplane the wing lift acts ahead of the centre of gravity, so
-`dCm/dalpha` has the wrong sign and the aircraft has no pitch stiffness:
-the expected result is a monotone pitch departure, not a glide. This is the
-increment that proves the tail is what stabilises the aircraft rather than
-some artefact of the assembly.
+Trim, the glide polar and the longitudinal and lateral modes are all found
+from this harness with the helpers in `src/flightdynamics.jl`, which solve for
+the steady glide directly rather than simulating and waiting to settle.
 """
-@component function TestGliderWingOnly(; name = nothing, kwargs...)
+@component function TestGlider(; name = nothing, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
   
-    @named model = TestGliderWingOnly()
+    @named model = TestGlider()
   """))
 
   __overrides = __build_overrides(kwargs)
@@ -67,7 +66,13 @@ some artefact of the assembly.
   push!(__systems, @named atm = Multtest.Atmosphere(; rho0=1.225, atm_overrides...))
   # Subcomponent glider of type Multtest.Glider
   glider_overrides = __pop_subcomponent_overrides!(__overrides, "glider")
-  push!(__systems, @named glider = Multtest.Glider(; has_htail=false, has_vtail=false, glider_overrides...))
+  push!(__systems, @named glider = Multtest.Glider(; glider_overrides...))
+  # Subcomponent elev of type BlockComponents.Sources.Constant
+  elev_overrides = __pop_subcomponent_overrides!(__overrides, "elev")
+  push!(__systems, @named elev = BlockComponents.Sources.Constant(; k=Float64(0.0), elev_overrides...))
+  # Subcomponent rud of type BlockComponents.Sources.Constant
+  rud_overrides = __pop_subcomponent_overrides!(__overrides, "rud")
+  push!(__systems, @named rud = BlockComponents.Sources.Constant(; k=Float64(0.0), rud_overrides...))
   # Subcomponent ail of type BlockComponents.Sources.Constant
   ail_overrides = __pop_subcomponent_overrides!(__overrides, "ail")
   push!(__systems, @named ail = BlockComponents.Sources.Constant(; k=Float64(0.0), ail_overrides...))
@@ -84,9 +89,11 @@ some artefact of the assembly.
 
   ### Equations
   push!(__eqs, connect(atm.air, glider.air))
+  push!(__eqs, connect(elev.y, glider.elevator))
+  push!(__eqs, connect(rud.y, glider.rudder))
   push!(__eqs, connect(ail.y, glider.aileron))
 
   # Return completely constructed System
   return System(__eqs, t, __vars, __params; systems=__systems, initial_conditions=__initial_conditions, guesses=__guesses, name, initialization_eqs=__initialization_eqs, bindings=__bindings, assertions=__assertions)
 end
-export TestGliderWingOnly
+export TestGlider

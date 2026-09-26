@@ -5,22 +5,26 @@
 
 
 @doc Markdown.doc"""
-   TestGliderWingOnly(; name)
+   TestGliderAileronStep(; name)
 
-Free flight with the wing only, released level.
+Aileron step from the longitudinal trim.
 
-With no tailplane the wing lift acts ahead of the centre of gravity, so
-`dCm/dalpha` has the wrong sign and the aircraft has no pitch stiffness:
-the expected result is a monotone pitch departure, not a glide. This is the
-increment that proves the tail is what stabilises the aircraft rather than
-some artefact of the assembly.
+The steady roll rate is the balance of the aileron rolling moment against the
+roll damping, `p = -L_delta*delta/L_p`. Roll damping was validated against the
+handbook to 0.3% and comes purely from where the panels sit, so the roll rate
+is a genuine prediction of the two together rather than something fitted.
+
+Watch the yaw as well: the up-going wing carries more induced drag, so the
+aircraft yaws *away* from the turn before the fin catches it. That adverse yaw
+is not supplied as a derivative either --- it falls out of the panels having
+their own drag.
 """
-@component function TestGliderWingOnly(; name = nothing, kwargs...)
+@component function TestGliderAileronStep(; name = nothing, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
   
-    @named model = TestGliderWingOnly()
+    @named model = TestGliderAileronStep()
   """))
 
   __overrides = __build_overrides(kwargs)
@@ -67,10 +71,16 @@ some artefact of the assembly.
   push!(__systems, @named atm = Multtest.Atmosphere(; rho0=1.225, atm_overrides...))
   # Subcomponent glider of type Multtest.Glider
   glider_overrides = __pop_subcomponent_overrides!(__overrides, "glider")
-  push!(__systems, @named glider = Multtest.Glider(; has_htail=false, has_vtail=false, glider_overrides...))
-  # Subcomponent ail of type BlockComponents.Sources.Constant
+  push!(__systems, @named glider = Multtest.Glider(; glider_overrides...))
+  # Subcomponent elev of type BlockComponents.Sources.Constant
+  elev_overrides = __pop_subcomponent_overrides!(__overrides, "elev")
+  push!(__systems, @named elev = BlockComponents.Sources.Constant(; k=Float64(0.0), elev_overrides...))
+  # Subcomponent rud of type BlockComponents.Sources.Constant
+  rud_overrides = __pop_subcomponent_overrides!(__overrides, "rud")
+  push!(__systems, @named rud = BlockComponents.Sources.Constant(; k=Float64(0.0), rud_overrides...))
+  # Subcomponent ail of type BlockComponents.Sources.Step
   ail_overrides = __pop_subcomponent_overrides!(__overrides, "ail")
-  push!(__systems, @named ail = BlockComponents.Sources.Constant(; k=Float64(0.0), ail_overrides...))
+  push!(__systems, @named ail = BlockComponents.Sources.Step(; height=0.15, start_time=Float64(1.0), offset=Float64(0.0), ail_overrides...))
 
   ### Check there are no unmatched overrides
   isempty(__overrides) || throw(ArgumentError("overrides: [$(join(keys(__overrides), ", "))] don't match names found in model. These names may exist in the model but could have been conditionally excluded."))
@@ -84,9 +94,11 @@ some artefact of the assembly.
 
   ### Equations
   push!(__eqs, connect(atm.air, glider.air))
+  push!(__eqs, connect(elev.y, glider.elevator))
+  push!(__eqs, connect(rud.y, glider.rudder))
   push!(__eqs, connect(ail.y, glider.aileron))
 
   # Return completely constructed System
   return System(__eqs, t, __vars, __params; systems=__systems, initial_conditions=__initial_conditions, guesses=__guesses, name, initialization_eqs=__initialization_eqs, bindings=__bindings, assertions=__assertions)
 end
-export TestGliderWingOnly
+export TestGliderAileronStep

@@ -5,7 +5,7 @@
 
 
 @doc Markdown.doc"""
-   Glider(; name, has_htail, m_fuselage, I_fus_roll, I_fus_yaw, I_fus_pitch, r_start, V_start, gamma_start, theta_start, b_wing, S_wing, x_ac_wing, y_ac_wing, dihedral_wing, incidence_wing, m_wing, b_htail, S_htail, x_ac_htail, y_ac_htail, incidence_htail, m_htail, CL_delta_elev, x_cp_fuselage, CdA_fus_x, CdA_fus_y, CdA_fus_z)
+   Glider(; name, has_htail, has_vtail, has_downwash, k_downwash, render, m_fuselage, I_fus_roll, I_fus_yaw, I_fus_pitch, r_start, V_start, gamma_start, theta_start, beta_start, phi_start, b_wing, S_wing, x_ac_wing, y_ac_wing, dihedral_wing, incidence_wing, m_wing, CL_delta_ail, CD_delta_ail, b_htail, S_htail, x_ac_htail, y_ac_htail, incidence_htail, m_htail, CL_delta_elev, b_vtail, S_vtail, x_ac_vtail, y_ac_vtail, m_vtail, CL_alpha_vtail, alpha_stall_vtail, CL_delta_rud, x_cp_fuselage, l_fuselage, radius_fuselage, CdA_fus_x, CdA_fus_y, CdA_fus_z)
 
 Standard class glider, 15 m span.
 
@@ -40,29 +40,47 @@ datum is done by `Body` from `r_cm`.
 | Name         | Description                         | Units  |   Default value |
 | ------------ | ----------------------------------- | ------ | --------------- |
 | `has_htail`         | Fit a horizontal tail; false leaves the aircraft pitch unstable on purpose                         | --  |   true |
+| `has_vtail`         | Fit a fin; false leaves the aircraft directionally unstable on purpose                         | --  |   true |
+| `has_downwash`         | Put the tailplane in the wing's downwash; false over-states the tail's effectiveness                         | --  |   true |
+| `k_downwash`         | Fraction of the far-field downwash the tailplane sees                         | --  |   1.0 |
+| `render`         | Draw the aircraft                         | --  |   true |
 | `m_fuselage`         | Mass of the fuselage, including the pilot and everything not in a surface                         | kg  |   230.0 |
 | `I_fus_roll`         | Fuselage roll inertia about its own centre of mass                         | kg.m2  |   35.0 |
 | `I_fus_yaw`         | Fuselage yaw inertia about its own centre of mass                         | kg.m2  |   700.0 |
 | `I_fus_pitch`         | Fuselage pitch inertia about its own centre of mass                         | kg.m2  |   700.0 |
 | `r_start`         | Launch state, given the way a flight condition is actually quoted: a speed, a flight path angle and a pitch attitude. The incidence follows as `theta_start - gamma_start`. The defaults are the hand-computed trim of the rig below; a residual here simply excites the phugoid.                         | m  |   [0.0, 500.0, 0.0] |
 | `V_start`         | Airspeed at release                         | m/s  |   25.0 |
-| `gamma_start`         | Flight path angle at release, negative descending                         | rad  |   -0.0235 |
-| `theta_start`         | Pitch attitude at release, positive nose up                         | rad  |   0.0257 |
+| `gamma_start`         | Flight path angle at release, negative descending                         | rad  |   -0.030476 |
+| `theta_start`         | Pitch attitude at release, positive nose up                         | rad  |   0.019560 |
+| `beta_start`         | Sideslip at release, positive with the relative wind from the right                         | rad  |   0.0 |
+| `phi_start`         | Bank angle at release, positive right wing down                         | rad  |   0.0 |
 | `b_wing`         | Wing span                         | m  |   15.0 |
 | `S_wing`         | Wing area                         | m2  |   10.5 |
-| `x_ac_wing`         | Wing aerodynamic centre ahead of the centre of gravity. This is the static margin knob: because the datum is the centre of gravity, moving the wing aerodynamic centre forward is the same as moving the centre of gravity aft, and the neutral point follows at about 0.9 times the change. Trimmed at 0.205 m the aircraft sits near 18% MAC, in the usual sailplane band.                         | m  |   0.205 |
+| `x_ac_wing`         | Wing aerodynamic centre ahead of the centre of gravity. This is the static margin knob: because the datum is the centre of gravity, moving the wing aerodynamic centre forward is the same as moving the centre of gravity aft, and the neutral point follows at about 0.9 times the change. […]                         | m  |   0.145 |
 | `y_ac_wing`         | Wing aerodynamic centre above the centre of gravity                         | m  |   0.0 |
 | `dihedral_wing`         | Wing dihedral                         | rad  |   0.052 |
 | `incidence_wing`         | Wing incidence relative to the fuselage datum, so the fuselage flies near zero incidence                         | rad  |   0.05236 |
 | `m_wing`         | Wing mass                         | kg  |   100.0 |
+| `CL_delta_ail`         | Lift coefficient per radian of aileron, as seen by the whole semi-span panel. […]                         | --  |   1.611 |
+| `CD_delta_ail`         | Wing drag coefficient per radian squared of aileron deflection                         | --  |   0.05 |
 | `b_htail`         | Tailplane span                         | m  |   2.2 |
 | `S_htail`         | Tailplane area                         | m2  |   1.0 |
 | `x_ac_htail`         | Tailplane aerodynamic centre ahead of the centre of gravity; negative is aft                         | m  |   -4.0 |
 | `y_ac_htail`         | Tailplane aerodynamic centre above the centre of gravity                         | m  |   0.25 |
-| `incidence_htail`         | Tailplane incidence relative to the fuselage datum. This is the rigging angle that sets the trim speed: the wing's camber moment `CM0` is nose-down and has to be balanced by a download on the tail, so the tailplane is set at a negative incidence. With it at zero the aircraft still trims, but at a useless incidence of about -2 degrees, and dives away at 90 m/s.                         | rad  |   -0.037373 |
+| `incidence_htail`         | Tailplane incidence relative to the fuselage datum. This is the rigging angle that sets the trim speed, and it is what the elevator would otherwise have to hold: rig it so the elevator sits near zero at the best glide speed, or the aircraft cruises with the stick permanently displaced. […]                         | rad  |   0.007662 |
 | `m_htail`         | Tailplane mass                         | kg  |   12.0 |
 | `CL_delta_elev`         | Tailplane lift coefficient per radian of elevator deflection                         | --  |   2.2 |
+| `b_vtail`         | Fin height above its root                         | m  |   1.2 |
+| `S_vtail`         | Fin area                         | m2  |   0.8 |
+| `x_ac_vtail`         | Fin aerodynamic centre ahead of the centre of gravity; negative is aft                         | m  |   -3.8 |
+| `y_ac_vtail`         | Fin root above the centre of gravity                         | m  |   0.3 |
+| `m_vtail`         | Fin mass                         | kg  |   8.0 |
+| `CL_alpha_vtail`         | Fin lift curve slope per radian. […]                         | --  |   3.8 |
+| `alpha_stall_vtail`         | Incidence at which the fin's flow separates. Low aspect ratio surfaces hold on well past the angle a high aspect ratio wing stalls at, so this sits at 20 degrees rather than the wing's 14. It matters: once sideslip exceeds it the fin stops restoring and the spiral departs with nothing to arrest it.                         | rad  |   0.35 |
+| `CL_delta_rud`         | Fin side force coefficient per radian of rudder deflection                         | --  |   1.5 |
 | `x_cp_fuselage`         | Station of the fuselage drag point, ahead of the centre of gravity. Slender body theory puts the body's normal force about a quarter of the body length behind the nose, which for this fuselage is just ahead of the centre of gravity; that is what produces the fuselage's destabilising contribution to pitch and yaw, so the station matters more than the drag areas do.                         | m  |   0.225 |
+| `l_fuselage`         | Fuselage length, nose to tail. Only drawn, not used aerodynamically. The drawn body is placed so its nose sits a quarter of the body length ahead of `x_cp_fuselage` --- the same slender-body assumption that station rests on, so the picture and the aerodynamic model cannot drift apart. […]                         | m  |   6.3 |
+| `radius_fuselage`         | Fuselage radius, for drawing                         | m  |   0.32 |
 | `CdA_fus_x`         | Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider                         | m2  |   0.05 |
 | `CdA_fus_y`         | Fuselage normal drag area Cd*S, from the plan area and a slender-body cross-flow Cd                         | m2  |   2.1 |
 | `CdA_fus_z`         | Fuselage side drag area Cd*S, from the side area and a slender-body cross-flow Cd                         | m2  |   2.4 |
@@ -78,8 +96,10 @@ broadcast and adds no force or mass balance of its own.
 
 The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
  * `elevator` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `rudder` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `aileron` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
 """
-@component function Glider(; name = nothing, has_htail=true, m_fuselage=Float64(230.0), I_fus_roll=Float64(35.0), I_fus_yaw=Float64(700.0), I_fus_pitch=Float64(700.0), r_start=[Float64(0.0), Float64(500.0), Float64(0.0)], V_start=Float64(25.0), gamma_start=-0.0235, theta_start=0.0257, b_wing=Float64(15.0), S_wing=10.5, x_ac_wing=0.205, y_ac_wing=Float64(0.0), dihedral_wing=0.052, incidence_wing=0.05236, m_wing=Float64(100.0), b_htail=2.2, S_htail=Float64(1.0), x_ac_htail=-4.0, y_ac_htail=0.25, incidence_htail=-0.037373, m_htail=Float64(12.0), CL_delta_elev=2.2, x_cp_fuselage=0.225, CdA_fus_x=0.05, CdA_fus_y=2.1, CdA_fus_z=2.4, kwargs...)
+@component function Glider(; name = nothing, has_htail=true, has_vtail=true, has_downwash=true, k_downwash=Float64(1.0), render=true, m_fuselage=Float64(230.0), I_fus_roll=Float64(35.0), I_fus_yaw=Float64(700.0), I_fus_pitch=Float64(700.0), r_start=[Float64(0.0), Float64(500.0), Float64(0.0)], V_start=Float64(25.0), gamma_start=-0.030476, theta_start=0.01956, beta_start=Float64(0.0), phi_start=Float64(0.0), b_wing=Float64(15.0), S_wing=10.5, x_ac_wing=0.145, y_ac_wing=Float64(0.0), dihedral_wing=0.052, incidence_wing=0.05236, m_wing=Float64(100.0), CL_delta_ail=1.611, CD_delta_ail=0.05, b_htail=2.2, S_htail=Float64(1.0), x_ac_htail=-4.0, y_ac_htail=0.25, incidence_htail=0.007662, m_htail=Float64(12.0), CL_delta_elev=2.2, b_vtail=1.2, S_vtail=0.8, x_ac_vtail=-3.8, y_ac_vtail=0.3, m_vtail=Float64(8.0), CL_alpha_vtail=3.8, alpha_stall_vtail=0.35, CL_delta_rud=1.5, x_cp_fuselage=0.225, l_fuselage=6.3, radius_fuselage=0.32, CdA_fus_x=0.05, CdA_fus_y=2.1, CdA_fus_z=2.4, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
@@ -106,11 +126,17 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   ### Path Parameters (non-final)
 
   ### Final Parameters (declarations)
-  append!(__params, @parameters (v_start[1:3]::Real), [description = "Initial velocity of the datum, world frame", misc = "final"])
-  append!(__params, @parameters (q_start[1:4]::Real), [description = "Initial attitude quaternion [w,i,j,k]; pitch is a rotation about the body z axis", misc = "final"])
+  append!(__params, @parameters (v_start[1:3]::Real), [description = "Initial velocity of the datum, world frame. Sideslip enters as a lateral
+  append!(__params, @parameters (v_start[1:3]::Real), [description = velocity component with the attitude unchanged, which is what sideslip is;
+  append!(__params, @parameters (v_start[1:3]::Real), [description = the magnitude stays `V_start` for any `beta_start`.", misc = "final"])
+  append!(__params, @parameters (q_start[1:4]::Real), [description = "Initial attitude quaternion [w,i,j,k]. Pitch is a rotation about the body z
+  append!(__params, @parameters (q_start[1:4]::Real), [description = axis and bank a rotation about the body x axis; this is the Hamilton product
+  append!(__params, @parameters (q_start[1:4]::Real), [description = `q_pitch * q_roll`, so the bank is applied in the pitched body frame.", misc = "final"])
   append!(__params, @parameters (y_panel_wing::Real), [description = "Spanwise station of the wing panels", misc = "final"])
   append!(__params, @parameters (y_cm_wing::Real), [description = "Height of the wing mass above the datum", misc = "final"])
   append!(__params, @parameters (m_htail_fitted::Real), [description = "Mass of the tailplane actually fitted", bounds = (0, Inf), misc = "final"])
+  append!(__params, @parameters (m_vtail_fitted::Real), [description = "Mass of the fin actually fitted", bounds = (0, Inf), misc = "final"])
+  append!(__params, @parameters (y_cm_vtail::Real), [description = "Height of the fin mass above the datum", misc = "final"])
   append!(__params, @parameters (m_total::Real), [description = "Total aircraft mass", bounds = (0, Inf), misc = "final"])
   append!(__params, @parameters (r_cm_fuselage[1:3]::Real), [description = "Fuselage centre of mass relative to the datum, chosen so that the
   append!(__params, @parameters (r_cm_fuselage[1:3]::Real), [description = composite centre of gravity of the aircraft lands on the datum.", misc = "final"])
@@ -118,6 +144,12 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   ### Deferred assignment (default values that depend on final parameters)
 
   ### Symbolic Parameters
+  __local__k_downwash = k_downwash
+  append!(__params, @parameters (k_downwash::Real), [description = "Fraction of the far-field downwash the tailplane sees"])
+  __initial_conditions[k_downwash] = __local__k_downwash
+  __local__render = render
+  append!(__params, @parameters (render::Bool), [description = "Draw the aircraft"])
+  __initial_conditions[render] = __local__render
   __local__m_fuselage = m_fuselage
   append!(__params, @parameters (m_fuselage::Real), [description = "Mass of the fuselage, including the pilot and everything not in a surface", bounds = (0, Inf)])
   __initial_conditions[m_fuselage] = __local__m_fuselage
@@ -145,6 +177,12 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__theta_start = theta_start
   append!(__params, @parameters (theta_start::Real), [description = "Pitch attitude at release, positive nose up"])
   __initial_conditions[theta_start] = __local__theta_start
+  __local__beta_start = beta_start
+  append!(__params, @parameters (beta_start::Real), [description = "Sideslip at release, positive with the relative wind from the right"])
+  __initial_conditions[beta_start] = __local__beta_start
+  __local__phi_start = phi_start
+  append!(__params, @parameters (phi_start::Real), [description = "Bank angle at release, positive right wing down"])
+  __initial_conditions[phi_start] = __local__phi_start
   __local__b_wing = b_wing
   append!(__params, @parameters (b_wing::Real), [description = "Wing span"])
   __initial_conditions[b_wing] = __local__b_wing
@@ -155,8 +193,13 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   append!(__params, @parameters (x_ac_wing::Real), [description = "Wing aerodynamic centre ahead of the centre of gravity. This is the static
   append!(__params, @parameters (x_ac_wing::Real), [description = margin knob: because the datum is the centre of gravity, moving the wing
   append!(__params, @parameters (x_ac_wing::Real), [description = aerodynamic centre forward is the same as moving the centre of gravity aft,
-  append!(__params, @parameters (x_ac_wing::Real), [description = and the neutral point follows at about 0.9 times the change. Trimmed at
-  append!(__params, @parameters (x_ac_wing::Real), [description = 0.205 m the aircraft sits near 18% MAC, in the usual sailplane band."])
+  append!(__params, @parameters (x_ac_wing::Real), [description = and the neutral point follows at about 0.9 times the change.
+  append!(__params, @parameters (x_ac_wing::Real), [description = 
+  append!(__params, @parameters (x_ac_wing::Real), [description = 0.145 m puts the aircraft at 15% MAC, in the usual sailplane band. Note this
+  append!(__params, @parameters (x_ac_wing::Real), [description = had to move forward from 0.205 when downwash was switched on: downwash cuts
+  append!(__params, @parameters (x_ac_wing::Real), [description = the tail's contribution by 17%, but the *net* `Mw` is a small difference of a
+  append!(__params, @parameters (x_ac_wing::Real), [description = destabilising wing term and a stabilising tail term, so a 17% cut to the tail
+  append!(__params, @parameters (x_ac_wing::Real), [description = took the static margin from 14% down to 8%."])
   __initial_conditions[x_ac_wing] = __local__x_ac_wing
   __local__y_ac_wing = y_ac_wing
   append!(__params, @parameters (y_ac_wing::Real), [description = "Wing aerodynamic centre above the centre of gravity"])
@@ -170,6 +213,29 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__m_wing = m_wing
   append!(__params, @parameters (m_wing::Real), [description = "Wing mass", bounds = (0, Inf)])
   __initial_conditions[m_wing] = __local__m_wing
+  __local__CL_delta_ail = CL_delta_ail
+  append!(__params, @parameters (CL_delta_ail::Real), [description = "Lift coefficient per radian of aileron, as seen by the whole semi-span panel.
+  append!(__params, @parameters (CL_delta_ail::Real), [description = 
+  append!(__params, @parameters (CL_delta_ail::Real), [description = This is a *lumped equivalent*, not a section value, and it has to be because
+  append!(__params, @parameters (CL_delta_ail::Real), [description = there is one panel per semi-span while a real aileron covers only its outer
+  append!(__params, @parameters (CL_delta_ail::Real), [description = part. It is set so the panel produces the correct rolling moment: for an
+  append!(__params, @parameters (CL_delta_ail::Real), [description = aileron running from 0.50 to 0.95 semi-span with an effectiveness of 0.5,
+  append!(__params, @parameters (CL_delta_ail::Real), [description = 
+  append!(__params, @parameters (CL_delta_ail::Real), [description =     dL_roll/d(delta) = 2*q*a*tau*integral(c*y dy) = 73.2*q
+  append!(__params, @parameters (CL_delta_ail::Real), [description = 
+  append!(__params, @parameters (CL_delta_ail::Real), [description = and the single panel gives `2*q*S_panel*CL_delta*y_panel = 45.5*q*CL_delta`,
+  append!(__params, @parameters (CL_delta_ail::Real), [description = hence 1.61.
+  append!(__params, @parameters (CL_delta_ail::Real), [description = 
+  append!(__params, @parameters (CL_delta_ail::Real), [description = Two consequences worth knowing. The panel's own lift coefficient swings less
+  append!(__params, @parameters (CL_delta_ail::Real), [description = than the real aileron strip's does, so this under-predicts tip stall at large
+  append!(__params, @parameters (CL_delta_ail::Real), [description = deflection. And the induced-drag asymmetry that causes adverse yaw acts at
+  append!(__params, @parameters (CL_delta_ail::Real), [description = `y_panel` rather than at the aileron's own centroid further out, so the
+  append!(__params, @parameters (CL_delta_ail::Real), [description = adverse yaw is low by roughly 20%. Both are fixed by raising the panel count,
+  append!(__params, @parameters (CL_delta_ail::Real), [description = not by adjusting this number."])
+  __initial_conditions[CL_delta_ail] = __local__CL_delta_ail
+  __local__CD_delta_ail = CD_delta_ail
+  append!(__params, @parameters (CD_delta_ail::Real), [description = "Wing drag coefficient per radian squared of aileron deflection"])
+  __initial_conditions[CD_delta_ail] = __local__CD_delta_ail
   __local__b_htail = b_htail
   append!(__params, @parameters (b_htail::Real), [description = "Tailplane span"])
   __initial_conditions[b_htail] = __local__b_htail
@@ -184,11 +250,14 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __initial_conditions[y_ac_htail] = __local__y_ac_htail
   __local__incidence_htail = incidence_htail
   append!(__params, @parameters (incidence_htail::Real), [description = "Tailplane incidence relative to the fuselage datum. This is the rigging
-  append!(__params, @parameters (incidence_htail::Real), [description = angle that sets the trim speed: the wing's camber moment `CM0` is
-  append!(__params, @parameters (incidence_htail::Real), [description = nose-down and has to be balanced by a download on the tail, so the
-  append!(__params, @parameters (incidence_htail::Real), [description = tailplane is set at a negative incidence. With it at zero the aircraft
-  append!(__params, @parameters (incidence_htail::Real), [description = still trims, but at a useless incidence of about -2 degrees, and dives
-  append!(__params, @parameters (incidence_htail::Real), [description = away at 90 m/s."])
+  append!(__params, @parameters (incidence_htail::Real), [description = angle that sets the trim speed, and it is what the elevator would otherwise
+  append!(__params, @parameters (incidence_htail::Real), [description = have to hold: rig it so the elevator sits near zero at the best glide speed,
+  append!(__params, @parameters (incidence_htail::Real), [description = or the aircraft cruises with the stick permanently displaced.
+  append!(__params, @parameters (incidence_htail::Real), [description = 
+  append!(__params, @parameters (incidence_htail::Real), [description = It is set here for a centre of gravity at 15% MAC with downwash active. The
+  append!(__params, @parameters (incidence_htail::Real), [description = tailplane carries only a small load at trim, so the incidence is close to
+  append!(__params, @parameters (incidence_htail::Real), [description = zero. Move `x_ac_wing`, or switch downwash off, and this has to be re-rigged
+  append!(__params, @parameters (incidence_htail::Real), [description = with it."])
   __initial_conditions[incidence_htail] = __local__incidence_htail
   __local__m_htail = m_htail
   append!(__params, @parameters (m_htail::Real), [description = "Tailplane mass", bounds = (0, Inf)])
@@ -196,6 +265,40 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__CL_delta_elev = CL_delta_elev
   append!(__params, @parameters (CL_delta_elev::Real), [description = "Tailplane lift coefficient per radian of elevator deflection"])
   __initial_conditions[CL_delta_elev] = __local__CL_delta_elev
+  __local__b_vtail = b_vtail
+  append!(__params, @parameters (b_vtail::Real), [description = "Fin height above its root"])
+  __initial_conditions[b_vtail] = __local__b_vtail
+  __local__S_vtail = S_vtail
+  append!(__params, @parameters (S_vtail::Real), [description = "Fin area"])
+  __initial_conditions[S_vtail] = __local__S_vtail
+  __local__x_ac_vtail = x_ac_vtail
+  append!(__params, @parameters (x_ac_vtail::Real), [description = "Fin aerodynamic centre ahead of the centre of gravity; negative is aft"])
+  __initial_conditions[x_ac_vtail] = __local__x_ac_vtail
+  __local__y_ac_vtail = y_ac_vtail
+  append!(__params, @parameters (y_ac_vtail::Real), [description = "Fin root above the centre of gravity"])
+  __initial_conditions[y_ac_vtail] = __local__y_ac_vtail
+  __local__m_vtail = m_vtail
+  append!(__params, @parameters (m_vtail::Real), [description = "Fin mass", bounds = (0, Inf)])
+  __initial_conditions[m_vtail] = __local__m_vtail
+  __local__CL_alpha_vtail = CL_alpha_vtail
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = "Fin lift curve slope per radian.
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = 
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = Well below the wing's because the fin's geometric aspect ratio is only 1.8,
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = but above the plain `2*pi*AR/(AR+2)` that geometry alone would give: the
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = fuselage acts as an endplate at the root and the tailplane partly does the
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = same at the top, so the *effective* aspect ratio is roughly 1.5 to 2 times
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = geometric. At 3.0 the aircraft's `C_n_beta` came out at 0.039, below the
+  append!(__params, @parameters (CL_alpha_vtail::Real), [description = 0.05 to 0.10 that sailplanes normally show; 3.8 puts it at 0.054."])
+  __initial_conditions[CL_alpha_vtail] = __local__CL_alpha_vtail
+  __local__alpha_stall_vtail = alpha_stall_vtail
+  append!(__params, @parameters (alpha_stall_vtail::Real), [description = "Incidence at which the fin's flow separates. Low aspect ratio surfaces hold
+  append!(__params, @parameters (alpha_stall_vtail::Real), [description = on well past the angle a high aspect ratio wing stalls at, so this sits at
+  append!(__params, @parameters (alpha_stall_vtail::Real), [description = 20 degrees rather than the wing's 14. It matters: once sideslip exceeds it
+  append!(__params, @parameters (alpha_stall_vtail::Real), [description = the fin stops restoring and the spiral departs with nothing to arrest it."])
+  __initial_conditions[alpha_stall_vtail] = __local__alpha_stall_vtail
+  __local__CL_delta_rud = CL_delta_rud
+  append!(__params, @parameters (CL_delta_rud::Real), [description = "Fin side force coefficient per radian of rudder deflection"])
+  __initial_conditions[CL_delta_rud] = __local__CL_delta_rud
   __local__x_cp_fuselage = x_cp_fuselage
   append!(__params, @parameters (x_cp_fuselage::Real), [description = "Station of the fuselage drag point, ahead of the centre of gravity. Slender
   append!(__params, @parameters (x_cp_fuselage::Real), [description = body theory puts the body's normal force about a quarter of the body length
@@ -203,6 +306,21 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   append!(__params, @parameters (x_cp_fuselage::Real), [description = gravity; that is what produces the fuselage's destabilising contribution to
   append!(__params, @parameters (x_cp_fuselage::Real), [description = pitch and yaw, so the station matters more than the drag areas do."])
   __initial_conditions[x_cp_fuselage] = __local__x_cp_fuselage
+  __local__l_fuselage = l_fuselage
+  append!(__params, @parameters (l_fuselage::Real), [description = "Fuselage length, nose to tail. Only drawn, not used aerodynamically. The
+  append!(__params, @parameters (l_fuselage::Real), [description = drawn body is placed so its nose sits a quarter of the body length ahead of
+  append!(__params, @parameters (l_fuselage::Real), [description = `x_cp_fuselage` --- the same slender-body assumption that station rests on,
+  append!(__params, @parameters (l_fuselage::Real), [description = so the picture and the aerodynamic model cannot drift apart.
+  append!(__params, @parameters (l_fuselage::Real), [description = 
+  append!(__params, @parameters (l_fuselage::Real), [description = Note the shape dimensions must be passed as *expressions* rather than as bare
+  append!(__params, @parameters (l_fuselage::Real), [description = parameter symbols. The visualizers declare `length`, `width` and `r_shape` as
+  append!(__params, @parameters (l_fuselage::Real), [description = time-dependent variables, so binding one to a bare parameter puts that
+  append!(__params, @parameters (l_fuselage::Real), [description = parameter and a variable in the same alias set, and anything else deriving a
+  append!(__params, @parameters (l_fuselage::Real), [description = parameter from it then fails with \"could not evaluate value of parameter\"."])
+  __initial_conditions[l_fuselage] = __local__l_fuselage
+  __local__radius_fuselage = radius_fuselage
+  append!(__params, @parameters (radius_fuselage::Real), [description = "Fuselage radius, for drawing"])
+  __initial_conditions[radius_fuselage] = __local__radius_fuselage
   __local__CdA_fus_x = CdA_fus_x
   append!(__params, @parameters (CdA_fus_x::Real), [description = "Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider"])
   __initial_conditions[CdA_fus_x] = __local__CdA_fus_x
@@ -214,16 +332,20 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __initial_conditions[CdA_fus_z] = __local__CdA_fus_z
 
   ### Final Parameters (assignments)
-  __bindings[v_start] = [V_start * cos(gamma_start), V_start * sin(gamma_start), 0.0]
-  __bindings[q_start] = [cos(theta_start / 2), 0.0, 0.0, sin(theta_start / 2)]
+  __bindings[v_start] = [V_start * cos(gamma_start) * cos(beta_start), V_start * sin(gamma_start), V_start * cos(gamma_start) * sin(beta_start)]
+  __bindings[q_start] = [cos(theta_start / 2) * cos(phi_start / 2), cos(theta_start / 2) * sin(phi_start / 2), sin(theta_start / 2) * sin(phi_start / 2), sin(theta_start / 2) * cos(phi_start / 2)]
   __bindings[y_panel_wing] = b_wing / (2 * sqrt(3.0))
   __bindings[y_cm_wing] = y_ac_wing + y_panel_wing * sin(dihedral_wing)
   __bindings[m_htail_fitted] = ifelse(has_htail, m_htail, 0.0)
-  __bindings[m_total] = m_fuselage + m_wing + m_htail_fitted
-  __bindings[r_cm_fuselage] = -(m_wing * [x_ac_wing, y_cm_wing, 0.0] + m_htail_fitted * [x_ac_htail, y_ac_htail, 0.0]) / m_fuselage
+  __bindings[m_vtail_fitted] = ifelse(has_vtail, m_vtail, 0.0)
+  __bindings[y_cm_vtail] = y_ac_vtail + b_vtail / (2 * sqrt(3.0))
+  __bindings[m_total] = m_fuselage + m_wing + m_htail_fitted + m_vtail_fitted
+  __bindings[r_cm_fuselage] = -(m_wing * [x_ac_wing, y_cm_wing, 0.0] + m_htail_fitted * [x_ac_htail, y_ac_htail, 0.0] + m_vtail_fitted * [x_ac_vtail, y_cm_vtail, 0.0]) / m_fuselage
 
   ### Final Path Parameters
   append!(__vars, @variables (elevator(t)::Real), [input = true])
+  append!(__vars, @variables (rudder(t)::Real), [input = true])
+  append!(__vars, @variables (aileron(t)::Real), [input = true])
 
   ### Variables (declarations)
 
@@ -239,17 +361,43 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__systems, @named fuselage = MultibodyComponents.Body(; m=m_fuselage, r_cm=r_cm_fuselage, I_11=I_fus_roll, I_22=I_fus_yaw, I_33=I_fus_pitch, orientation_state=MultibodyComponents.OrientationState.Quaternion(), statePriority=1000, linearStatePriority=1000, initialize_orientation=false, r_0__initial=r_start, v_0__initial=v_start, Q_hat__initial=q_start, fuselage_overrides...))
   # Subcomponent wing of type Multtest.Wing
   wing_overrides = __pop_subcomponent_overrides!(__overrides, "wing")
-  push!(__systems, @named wing = Multtest.Wing(; b=b_wing, S=S_wing, x_ac=x_ac_wing, y_ac=y_ac_wing, dihedral=dihedral_wing, incidence=incidence_wing, m=m_wing, CL0=0.25, CL_alpha=5.7, CD0=0.008, CM0=-0.09, e_oswald=0.95, alpha_stall=0.244, wing_overrides...))
+  push!(__systems, @named wing = Multtest.Wing(; has_control=true, b=b_wing, S=S_wing, x_ac=x_ac_wing, y_ac=y_ac_wing, dihedral=dihedral_wing, incidence=incidence_wing, m=m_wing, CL0=0.25, CL_alpha=5.7, CD0=0.008, CM0=-0.09, e_oswald=0.95, alpha_stall=0.244, CL_delta=CL_delta_ail, CM_delta=-0.45, CD_delta=CD_delta_ail, wing_overrides...))
+  # Subcomponent ail_invert of type BlockComponents.Math.Gain
+  ail_invert_overrides = __pop_subcomponent_overrides!(__overrides, "ail_invert")
+  push!(__systems, @named ail_invert = BlockComponents.Math.Gain(; k=-1.0, ail_invert_overrides...))
   # Subcomponent fus_mount of type MultibodyComponents.FixedTranslation
   fus_mount_overrides = __pop_subcomponent_overrides!(__overrides, "fus_mount")
   push!(__systems, @named fus_mount = MultibodyComponents.FixedTranslation(; r=[x_cp_fuselage, Float64(0.0), Float64(0.0)], render=false, fus_mount_overrides...))
+  # Subcomponent fus_vis of type MultibodyComponents.CylinderVisualizer
+  fus_vis_overrides = __pop_subcomponent_overrides!(__overrides, "fus_vis")
+  push!(__systems, @named fus_vis = MultibodyComponents.CylinderVisualizer(; render=render, color=[0.93, 0.93, 0.95, Float64(1.0)], radius=radius_fuselage * 1.0, length=l_fuselage * 1.0, length_direction=[-1.0, 0.0, 0.0], r_shape=[x_cp_fuselage + 0.25 * l_fuselage, 0.0, 0.0], fus_vis_overrides...))
+  # Subcomponent vtail_mount of type MultibodyComponents.FixedTranslation
+  vtail_mount_overrides = __pop_subcomponent_overrides!(__overrides, "vtail_mount")
+  if has_vtail
+    push!(__systems, @named vtail_mount = MultibodyComponents.FixedTranslation(; r=[x_ac_vtail, y_ac_vtail, Float64(0.0)], render=false, vtail_mount_overrides...))
+  end
+  # Subcomponent vtail_roll of type MultibodyComponents.FixedRotation
+  vtail_roll_overrides = __pop_subcomponent_overrides!(__overrides, "vtail_roll")
+  if has_vtail
+    push!(__systems, @named vtail_roll = MultibodyComponents.FixedRotation(; n=[Float64(1.0), Float64(0.0), Float64(0.0)], angle=1.5707963267948966, render=false, vtail_roll_overrides...))
+  end
+  # Subcomponent vtail of type Multtest.Wing
+  vtail_overrides = __pop_subcomponent_overrides!(__overrides, "vtail")
+  if has_vtail
+    push!(__systems, @named vtail = Multtest.Wing(; has_control=true, mirror_right=false, b=b_vtail, S=S_vtail, x_ac=Float64(0.0), y_ac=Float64(0.0), dihedral=Float64(0.0), incidence=Float64(0.0), m=m_vtail, I_panel=Float64(1.0), CL0=Float64(0.0), CL_alpha=CL_alpha_vtail, CD0=0.009, CM0=Float64(0.0), e_oswald=0.8, alpha_stall=alpha_stall_vtail, CL_delta=CL_delta_rud, CM_delta=-0.4, CD_delta=0.02, vtail_overrides...))
+  end
   # Subcomponent fus_drag of type Multtest.DragBody
   fus_drag_overrides = __pop_subcomponent_overrides!(__overrides, "fus_drag")
   push!(__systems, @named fus_drag = Multtest.DragBody(; CdA_x=CdA_fus_x, CdA_y=CdA_fus_y, CdA_z=CdA_fus_z, fus_drag_overrides...))
+  # Subcomponent downwash of type Multtest.Downwash
+  downwash_overrides = __pop_subcomponent_overrides!(__overrides, "downwash")
+  if (has_htail) && (has_downwash)
+    push!(__systems, @named downwash = Multtest.Downwash(; b=b_wing, k=k_downwash, downwash_overrides...))
+  end
   # Subcomponent htail of type Multtest.Wing
   htail_overrides = __pop_subcomponent_overrides!(__overrides, "htail")
   if has_htail
-    push!(__systems, @named htail = Multtest.Wing(; has_control=true, b=b_htail, S=S_htail, x_ac=x_ac_htail, y_ac=y_ac_htail, dihedral=Float64(0.0), incidence=incidence_htail, m=m_htail, I_panel=Float64(2.0), CL0=Float64(0.0), CL_alpha=4.4, CD0=0.008, CM0=Float64(0.0), e_oswald=0.85, alpha_stall=0.244, CL_delta=CL_delta_elev, CM_delta=-0.55, CD_delta=0.02, htail_overrides...))
+    push!(__systems, @named htail = Multtest.Wing(; has_induced_flow=has_downwash, has_control=true, b=b_htail, S=S_htail, x_ac=x_ac_htail, y_ac=y_ac_htail, dihedral=Float64(0.0), incidence=incidence_htail, m=m_htail, I_panel=Float64(2.0), CL0=Float64(0.0), CL_alpha=4.4, CD0=0.008, CM0=Float64(0.0), e_oswald=0.85, alpha_stall=0.244, CL_delta=CL_delta_elev, CM_delta=-0.55, CD_delta=0.02, htail_overrides...))
   end
 
   ### Check there are no unmatched overrides
@@ -265,7 +413,9 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   ### Equations
   push!(__eqs, connect(fuselage.frame_a, wing.frame_a))
   push!(__eqs, connect(air, wing.air))
-  push!(__eqs, connect(fuselage.frame_a, fus_mount.frame_a))
+  push!(__eqs, connect(aileron, wing.delta_l, ail_invert.u))
+  push!(__eqs, connect(ail_invert.y, wing.delta_r))
+  push!(__eqs, connect(fuselage.frame_a, fus_mount.frame_a, fus_vis.frame_a))
   push!(__eqs, connect(fus_mount.frame_b, fus_drag.frame_a))
   push!(__eqs, connect(air, fus_drag.air))
 
@@ -274,6 +424,21 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
     push!(__eqs, connect(fuselage.frame_a, htail.frame_a))
     push!(__eqs, connect(air, htail.air))
     push!(__eqs, connect(elevator, htail.delta_l, htail.delta_r))
+    if has_downwash
+      push!(__eqs, connect(fuselage.frame_a, downwash.frame_a))
+      push!(__eqs, connect(air, downwash.air))
+      push!(__eqs, connect(wing.L_total, downwash.L_up))
+      push!(__eqs, connect(downwash.w_dw, htail.w_induced))
+    else
+    end
+  else
+  end
+  if has_vtail
+    push!(__eqs, connect(fuselage.frame_a, vtail_mount.frame_a))
+    push!(__eqs, connect(vtail_mount.frame_b, vtail_roll.frame_a))
+    push!(__eqs, connect(vtail_roll.frame_b, vtail.frame_a))
+    push!(__eqs, connect(air, vtail.air))
+    push!(__eqs, connect(rudder, vtail.delta_l))
   else
   end
 

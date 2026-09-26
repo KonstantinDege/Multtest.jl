@@ -229,6 +229,50 @@ function stability_derivatives(prob, L::StateLayout, tr, V; control, altitude = 
 end
 
 """
+    lateral_derivatives(prob, L, tr, V; control, altitude)
+
+Dimensional lateral derivatives at a trim point, by perturbing the sideslip
+velocity and the roll and yaw rates.
+
+Sign conventions in this frame (x forward, y up, z right) are not the textbook
+ones and are worth stating: `v` is the body z velocity, positive to the right;
+a positive roll rate `w_a[1]` is right wing **down**; a positive yaw rate
+`w_a[2]` is nose **left**. So stability reads as
+
+* `Nv < 0` --- directional stiffness, the aircraft weathercocks into the slip,
+* `Lv < 0` --- dihedral effect, sideslip to the right rolls it left,
+* `Lp < 0` --- roll damping,
+* `Nr < 0` --- yaw damping.
+
+`Lp` and `Lv` are produced entirely by where the wing panels sit; nothing
+supplies them as coefficients.
+"""
+function lateral_derivatives(prob, L::StateLayout, tr, V; control, altitude = 500.0)
+    prob.ps[control] = tr.control
+    th = tr.theta
+    R  = [cos(th) sin(th) 0.0; -sin(th) cos(th) 0.0; 0.0 0.0 1.0]
+    ub = V * cos(tr.alpha); wb = V * sin(tr.alpha)
+    du = zeros(L.n)
+    function acc(dv, dp, dr)
+        v0 = R' * [ub, -wb, dv]
+        u = glide_state(L, V, tr.gamma, tr.theta; altitude)
+        u[L.v0[1]] = v0[1]; u[L.v0[2]] = v0[2]; u[L.v0[3]] = v0[3]
+        u[L.w[1]] = dp; u[L.w[2]] = dr
+        prob.f(du, u, prob.p, 0.0)
+        (roll = du[L.w[1]], yaw = du[L.w[2]],
+         side = (R * [du[L.v0[1]], du[L.v0[2]], du[L.v0[3]]])[3])
+    end
+    h = 1e-4
+    d(s, a, b) = (getfield(a, s) - getfield(b, s)) / (2h)
+    pv, mv = acc(h, 0, 0), acc(-h, 0, 0)
+    pp, mp = acc(0, h, 0), acc(0, -h, 0)
+    pr, mr = acc(0, 0, h), acc(0, 0, -h)
+    (Yv = d(:side, pv, mv), Lv = d(:roll, pv, mv), Nv = d(:yaw, pv, mv),
+     Lp = d(:roll, pp, mp), Np = d(:yaw, pp, mp),
+     Lr = d(:roll, pr, mr), Nr = d(:yaw, pr, mr))
+end
+
+"""
     glide_polar(prob, L, Vs; control, altitude)
 
 Trim across a range of airspeeds by continuation, feeding each solution forward
