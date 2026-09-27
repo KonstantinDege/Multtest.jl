@@ -361,13 +361,48 @@ end
 
 # ---------------------------------------------------------------------------
 @testset "configuration comparisons" begin
-    # PHYSICS: without a tailplane the aircraft has pitch stiffness of the
-    # wrong sign, and departs rather than glides
+    # PHYSICS: without a tailplane the pitch stiffness has the wrong sign.
+    # Stated as the derivative rather than as a divergence rate, so it does not
+    # depend on how the aircraft happens to be released. Evaluated at the launch
+    # state directly, because a tailless aircraft has no pitch control and so no
+    # trim in the three-unknown sense.
     sysw = build(:TestGliderWingOnly)
-    solw = sim(sysw, 4.0)
-    q = [abs(solw(t, idxs = sysw.glider.fuselage.w_a[3])) for t in 0:0.1:4]
-    @test issorted(q[1:30])                       # monotone divergence, not an oscillation
-    @test rad2deg(q[end]) > 30.0
+    prw = ODEProblem(sysw, [], (0.0, 1.0))
+    Lw = FD.StateLayout(sysw, sysw.glider.fuselage)
+    th, gam, V = 0.0196, -0.0305, 25.0
+    al = th - gam
+    Rb = [cos(th) sin(th) 0.0; -sin(th) cos(th) 0.0; 0.0 0.0 1.0]
+    ub, wb = V * cos(al), V * sin(al)
+    duw = zeros(Lw.n)
+    function pitchacc(dw)
+        v0 = Rb' * [ub, -(wb + dw), 0.0]
+        u = FD.glide_state(Lw, V, gam, th)
+        u[Lw.v0[1]] = v0[1]; u[Lw.v0[2]] = v0[2]; u[Lw.v0[3]] = v0[3]
+        prw.f(duw, u, prw.p, 0.0)
+        duw[Lw.w[3]]
+    end
+    hw = 1e-4
+    @test (pitchacc(hw) - pitchacc(-hw)) / (2hw) > 0      # unstable in pitch
+
+    # PHYSICS: and it therefore departs, leaving the normal incidence range
+    # entirely rather than settling into a glide
+    solw = sim(sysw, 12.0)
+    alw = [rad2deg(solw(t, idxs = sysw.glider.wing.panel_l.alpha)) for t in 0:0.25:12]
+    qw  = [rad2deg(solw(t, idxs = sysw.glider.fuselage.w_a[3])) for t in 0:0.25:12]
+    @test maximum(abs, alw) > 45.0
+    @test maximum(abs, qw) > 60.0
+
+    # PHYSICS: the full aircraft, by contrast, has restoring pitch stiffness
+    sysf = build(:TestGlider)
+    prf = ODEProblem(sysf, [], (0.0, 1.0))
+    Lf = FD.StateLayout(sysf, sysf.glider.fuselage)
+    trf = FD.trim_glide(prf, Lf, 25.0; control = sysf.elev.k, x0 = [-0.0305, 0.0196, 0.0])
+    @test FD.stability_derivatives(prf, Lf, trf, 25.0; control = sysf.elev.k).Mw < 0
+
+    # ROBUSTNESS: a control with no authority gives a singular Jacobian, which
+    # must be reported as non-convergence rather than thrown
+    bad = FD.trim_glide(prw, Lw, 25.0; control = sysw.glider.k_downwash)
+    @test !bad.converged
 
     # PHYSICS: downwash reduces the net pitch stiffness, and by more than it
     # reduces the tail term alone, because Mw is a difference of two larger

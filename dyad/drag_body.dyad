@@ -35,10 +35,9 @@ No torque is applied: a point drag force has no couple of its own.
 """
 component DragBody
   "Mount at the body's centre of pressure"
-  frame_a = Frame3D()
+  frame_a = Frame3D() {^frame_a}
   "Density and wind at the body"
-  air = AirState()
-
+  air = AirState() {^air}
   "Drag area Cd*S for motion along the body x axis"
   parameter CdA_x::Area = 0.05
   "Drag area Cd*S for motion along the body y axis"
@@ -47,7 +46,6 @@ component DragBody
   parameter CdA_z::Area = 1.0
   "Speed below which the drag is faded out; keep well below any flight speed"
   parameter v_eps::Velocity = 0.5
-
   "Velocity of the mounting point relative to the air mass, world frame"
   variable v_rel_0::Velocity[3]
   "Velocity of the mounting point relative to the air mass, body frame"
@@ -61,13 +59,21 @@ component DragBody
 relations
   v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
   v_rel_s = MultibodyComponents.resolve2(frame_a.R, v_rel_0)
-  V = sqrt(v_rel_s[1]^2 + v_rel_s[2]^2 + v_rel_s[3]^2 + v_eps^2)
-  F_s = -0.5 * air.rho * V * [CdA_x * v_rel_s[1],
-                              CdA_y * v_rel_s[2],
-                              CdA_z * v_rel_s[3]]
-  D = sqrt(F_s[1]^2 + F_s[2]^2 + F_s[3]^2)
+  V = sqrt(v_rel_s[1] ^ 2 + v_rel_s[2] ^ 2 + v_rel_s[3] ^ 2 + v_eps ^ 2)
+  F_s = -0.5 * air.rho * V * [CdA_x * v_rel_s[1], CdA_y * v_rel_s[2], CdA_z * v_rel_s[3]]
+  D = sqrt(F_s[1] ^ 2 + F_s[2] ^ 2 + F_s[3] ^ 2)
   frame_a.f = -F_s
   frame_a.tau = [0, 0, 0]
+metadata {
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 450, "y2": 550}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"diagram": {"x1": 950, "x2": 1050, "y1": 450, "y2": 550}}}
+    }
+  }
+}
 end
 
 """
@@ -80,9 +86,7 @@ the sign wrong is immediately visible.
 """
 test component TestDragTerminal
   world = MultibodyComponents.World()
-  body = MultibodyComponents.Body(m = 1.0,
-                                  orientation_state = MultibodyComponents.OrientationState.Quaternion(),
-                                  statePriority = 1000, linearStatePriority = 1000)
+  body = MultibodyComponents.Body(m = 1.0, orientation_state = MultibodyComponents.OrientationState.Quaternion(), statePriority = 1000, linearStatePriority = 1000)
   drag = DragBody(CdA_x = 0.5, CdA_y = 0.5, CdA_z = 0.5)
 relations
   drag.air.rho = 1.225

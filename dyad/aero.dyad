@@ -99,15 +99,13 @@ aerodynamic centre.
 """
 component AeroSurface
   "Mount at the panel's aerodynamic centre; +x chordwise forward, +y lift, +z spanwise"
-  frame_a = Frame3D()
+  frame_a = Frame3D() {^frame_a}
   "Density and wind at the panel"
-  air = AirState()
+  air = AirState() {^air}
   "Control surface deflection, positive trailing edge down"
-  delta = RealInput() if has_control
-
+  delta = RealInput() if has_control {^delta}
   "Downwash velocity at the panel, positive downward, in the panel frame"
-  w_induced = RealInput() if has_induced_flow
-
+  w_induced = RealInput() if has_induced_flow {^w_induced}
   "Give the panel a control surface deflection input"
   structural parameter has_control::Boolean = false
   """
@@ -117,7 +115,6 @@ component AeroSurface
   carries through the lift, the drag and the moment together.
   """
   structural parameter has_induced_flow::Boolean = false
-
   "Panel reference (planform) area"
   parameter S::Area = 1.0
   "Panel mean aerodynamic chord, used for the pitching moment"
@@ -150,7 +147,6 @@ component AeroSurface
   parameter v_eps::Velocity = 0.5
   "Smoothing constant for |sin(alpha)|"
   parameter s_eps::Real = 1e-4
-
   "Velocity of the panel relative to the air mass, world frame"
   variable v_rel_0::Velocity[3]
   "Velocity of the panel relative to the air mass, panel frame"
@@ -203,41 +199,49 @@ relations
   else
     w = -v_rel_s[2]
   end
-
   # --- regularised incidence ----------------------------------------------
-  V = sqrt(u^2 + w^2 + v_eps^2)
+  V = sqrt(u ^ 2 + w ^ 2 + v_eps ^ 2)
   sa = w / V
   ca = u / V
-  sa_abs = sqrt(sa^2 + s_eps^2)
+  sa_abs = sqrt(sa ^ 2 + s_eps ^ 2)
   alpha = atan(w, u)
-
   # --- control deflection --------------------------------------------------
   if has_control
     d_eff = delta
   else
     d_eff = 0
   end
-
   # --- attached / separated blend ------------------------------------------
-  sigma = 1 - (1 - 0.5 * (1 + tanh(M_stall * (sa_abs - sin(alpha_stall))))) *
-              (1 - 0.5 * (1 - tanh(M_rev * ca)))
-
+  sigma = 1 - (1 - 0.5 * (1 + tanh(M_stall * (sa_abs - sin(alpha_stall))))) * (1 - 0.5 * (1 - tanh(M_rev * ca)))
   # --- coefficients ---------------------------------------------------------
   CL_att = CL0 + CL_alpha * sa + CL_delta * d_eff
   CL = (1 - sigma) * CL_att + sigma * (2 * sa * sa_abs * ca)
-  CD = CD0 + (1 - sigma) * (CL_att^2 / (3.141592653589793 * e_oswald * AR)
-                            + CD_delta * d_eff^2)
-            + sigma * (2 * sa^2)
+  CD = CD0 + (1 - sigma) * (CL_att ^ 2 / (3.141592653589793 * e_oswald * AR) + CD_delta * d_eff ^ 2) + sigma * (2 * sa ^ 2)
   CN = CL * ca + CD * sa
   CM = CM0 + CM_delta * d_eff - sigma * 0.25 * CN
-
   # --- forces ---------------------------------------------------------------
-  q = 0.5 * air.rho * (u^2 + w^2)
+  q = 0.5 * air.rho * (u ^ 2 + w ^ 2)
   L = q * S * CL
   D = q * S * CD
   F_s = [L * sa - D * ca, L * ca + D * sa, 0]
   frame_a.f = -F_s
   frame_a.tau = -[0, 0, q * S * c * CM]
+metadata {
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 450, "y2": 550}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 550, "y1": -50, "y2": 50}}}
+    },
+    "delta": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 560, "y1": 950, "y2": 1050}}}
+    },
+    "w_induced": {
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 440, "y2": 540}}}
+    }
+  }
+}
 end
 
 """
@@ -276,23 +280,19 @@ component Downwash
   L_up = RealInput()
   "Downwash velocity at the downstream surface, positive downward"
   w_dw = RealOutput()
-
   "Span of the upstream surface"
   parameter b::Length = 15.0
   "Fraction of the far-field downwash seen; 1 for a tail several chords behind"
   parameter k::Real = 1.0
   "Speed below which the downwash is faded out"
   parameter v_eps::Velocity = 1.0
-
   "Flight speed through the air mass"
   variable V::Velocity
 relations
   frame_a.f = [0, 0, 0]
   frame_a.tau = [0, 0, 0]
-  V = sqrt((der(frame_a.r_0[1]) - air.v_wind_x)^2
-           + (der(frame_a.r_0[2]) - air.v_wind_y)^2
-           + (der(frame_a.r_0[3]) - air.v_wind_z)^2 + v_eps^2)
-  w_dw = k * 4 * L_up / (3.141592653589793 * air.rho * V * b^2)
+  V = sqrt((der(frame_a.r_0[1]) - air.v_wind_x) ^ 2 + (der(frame_a.r_0[2]) - air.v_wind_y) ^ 2 + (der(frame_a.r_0[3]) - air.v_wind_z) ^ 2 + v_eps ^ 2)
+  w_dw = k * 4 * L_up / (3.141592653589793 * air.rho * V * b ^ 2)
 end
 
 """
@@ -307,9 +307,7 @@ panel's attitude.
 test component TestAeroSweep
   world = MultibodyComponents.World(render = false)
   mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9,
-                     CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05,
-                     alpha_stall = 0.26)
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26)
   "Airspeed held constant through the sweep"
   parameter V_test::Velocity = 25.0
   "Duration of one full turn of the velocity vector"
@@ -337,9 +335,7 @@ that the force grows as the square of the airspeed.
 test component TestAeroSpeedRamp
   world = MultibodyComponents.World(render = false)
   mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9,
-                     CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05,
-                     alpha_stall = 0.26)
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26)
   "Incidence held constant through the ramp"
   parameter alpha_test::Angle = 0.0873
   "Airspeed reached at the end of the ramp"

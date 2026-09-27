@@ -35,34 +35,33 @@ sideslip angle and its lift becomes a side force.
 """
 component Wing
   "Mount on the fuselage at the aircraft reference point"
-  frame_a = Frame3D()
+  frame_a = Frame3D() {^frame_a}
   "Density and wind"
-  air = AirState()
+  air = AirState() {^air}
   "Left panel control deflection, positive trailing edge down"
-  delta_l = RealInput() if has_control
+  delta_l = RealInput() if has_control {^delta_l}
   "Right panel control deflection, positive trailing edge down"
-  delta_r = RealInput() if has_control
+  delta_r = RealInput() if has_control {^delta_r}
   # --- structure: mount to the surface root --------------------------------
-  root = MultibodyComponents.FixedTranslation(r = [x_ac, y_ac, 0.0], render = false)
+  root = MultibodyComponents.FixedTranslation(r = [x_ac, y_ac, 0.0], render = false) {^root}
   # --- left panel ----------------------------------------------------------
-  dih_l = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = dihedral, render = false)
-  span_l = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, -y_panel], render = false)
-  inc_l = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false)
-  panel_l = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta)
-  mass_l = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false)
-  vis_l = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, y_panel - ifelse(mirror_right, b / 4, b / 2)])
+  dih_l = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = dihedral, render = false) {^dih_l}
+  span_l = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, -y_panel], render = false) {^span_l}
+  inc_l = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false) {^inc_l}
+  panel_l = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) {^panel_l}
+  mass_l = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false) {^mass_l}
+  vis_l = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, y_panel - ifelse(mirror_right, b / 4, b / 2)]) {^vis_l}
   # --- right panel ---------------------------------------------------------
-  dih_r = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = -dihedral, render = false) if mirror_right
-  span_r = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, y_panel], render = false) if mirror_right
-  inc_r = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false) if mirror_right
-  panel_r = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) if mirror_right
-  mass_r = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false) if mirror_right
-  vis_r = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, b / 4 - y_panel]) if mirror_right
+  dih_r = MultibodyComponents.FixedRotation(n = [1.0, 0.0, 0.0], angle = -dihedral, render = false) if mirror_right {^dih_r}
+  span_r = MultibodyComponents.FixedTranslation(r = [0.0, 0.0, y_panel], render = false) if mirror_right {^span_r}
+  inc_r = MultibodyComponents.FixedRotation(n = [0.0, 0.0, 1.0], angle = incidence, render = false) if mirror_right {^inc_r}
+  panel_r = AeroSurface(has_control = has_control, has_induced_flow = has_induced_flow, S = S_panel, c = c_bar, AR = AR, e_oswald = e_oswald, CL0 = CL0, CL_alpha = CL_alpha, CD0 = CD0, CM0 = CM0, alpha_stall = alpha_stall, M_stall = M_stall, CL_delta = CL_delta, CM_delta = CM_delta, CD_delta = CD_delta) if mirror_right {^panel_r}
+  mass_r = MultibodyComponents.Body(m = m_panel, I_11 = I_panel, I_22 = I_panel, I_33 = I_panel, render = false) if mirror_right {^mass_r}
+  vis_r = MultibodyComponents.BoxVisualizer(render = render, color = color, length = S / b, length_direction = [1.0, 0.0, 0.0], width = ifelse(mirror_right, b / 2, b), width_direction = [0.0, 0.0, 1.0], height = thickness_ratio * S / b, r_shape = [-0.75 * S / b, 0.0, b / 4 - y_panel]) if mirror_right {^vis_r}
   "Downwash velocity at this surface, positive downward; fanned out to both panels"
-  w_induced = RealInput() if has_induced_flow
+  w_induced = RealInput() if has_induced_flow {^w_induced}
   "Total lift of the surface, for driving the downwash on anything behind it"
-  L_total = RealOutput()
-
+  L_total = RealOutput() {^L_total}
   "Give the panels control surface deflection inputs"
   structural parameter has_control::Boolean = false
   "Take an induced-flow input, for a surface sitting in another's wake"
@@ -111,7 +110,6 @@ component Wing
   parameter color::Real[4] = [0.88, 0.88, 0.91, 1.0]
   "Thickness of the drawn surface as a fraction of chord"
   parameter thickness_ratio::Real = 0.12
-
   "Spanwise station of the panels, measured from the root along the span"
   parameter y_panel::Length = b / (2 * sqrt(3.0))
   "Aspect ratio of the surface"
@@ -130,12 +128,12 @@ component Wing
   """
   final parameter span_extent::Length = ifelse(mirror_right, b / 2, b)
 relations
-  connect(frame_a, root.frame_a)
-  connect(root.frame_b, dih_l.frame_a)
-  connect(dih_l.frame_b, span_l.frame_a)
-  connect(span_l.frame_b, inc_l.frame_a)
-  connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a, vis_l.frame_a)
-  connect(air, panel_l.air)
+  connect(frame_a, root.frame_a) {^id20}
+  connect(root.frame_b, dih_l.frame_a) {^id21}
+  connect(dih_l.frame_b, span_l.frame_a) {^id22}
+  connect(span_l.frame_b, inc_l.frame_a) {^id23}
+  connect(inc_l.frame_b, panel_l.frame_a, mass_l.frame_a, vis_l.frame_a) {^id24}
+  connect(air, panel_l.air) {^id25}
   if has_induced_flow
     connect(w_induced, panel_l.w_induced)
   end
@@ -158,4 +156,93 @@ relations
   else
     L_total = panel_l.L
   end
+metadata {
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 450, "y2": 550}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 230, "y2": 330}}}
+    },
+    "delta_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 40, "y2": 140}}}
+    },
+    "delta_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 250, "y2": 350}}}
+    },
+    "root": {
+      "Dyad": {"placement": {"diagram": {"x1": 140, "x2": 240, "y1": 380, "y2": 480}}}
+    },
+    "dih_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 260, "x2": 360, "y1": 380, "y2": 480}}}
+    },
+    "span_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 380, "x2": 480, "y1": 380, "y2": 480}}}
+    },
+    "inc_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 500, "x2": 600, "y1": 380, "y2": 480}}}
+    },
+    "panel_l": {
+      "Dyad": {
+        "placement": {"diagram": {"x1": 680, "x2": 780, "y1": 220, "y2": 320, "rot": 270}}
+      }
+    },
+    "mass_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 800, "x2": 900, "y1": 380, "y2": 480}}}
+    },
+    "vis_l": {
+      "Dyad": {"placement": {"diagram": {"x1": 860, "x2": 960, "y1": 460, "y2": 560}}}
+    },
+    "dih_r": {"Dyad": {"placement": {"diagram": {"x1": 20, "x2": 120, "y1": 20, "y2": 120}}}},
+    "span_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 140, "x2": 240, "y1": 20, "y2": 120}}}
+    },
+    "inc_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 260, "x2": 360, "y1": 20, "y2": 120}}}
+    },
+    "panel_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 550, "y1": -50, "y2": 50}}}
+    },
+    "mass_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 400, "x2": 500, "y1": 130, "y2": 230}}}
+    },
+    "vis_r": {
+      "Dyad": {"placement": {"diagram": {"x1": 500, "x2": 600, "y1": 130, "y2": 230}}}
+    },
+    "w_induced": {
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 670, "y2": 770}}}
+    },
+    "L_total": {
+      "Dyad": {"placement": {"diagram": {"x1": 460, "x2": 560, "y1": 950, "y2": 1050}}}
+    },
+    "id20": {
+      "Dyad": {
+        "edges": [{"S": 1, "M": [{"x": 110, "y": 500}, {"x": 110, "y": 430}], "E": 2}],
+        "path": {}
+      }
+    },
+    "id21": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}], "path": {}}},
+    "id22": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}], "path": {}}},
+    "id23": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}], "path": {}}},
+    "id24": {
+      "Dyad": {
+        "edges": [
+          {"S": 1, "M": [], "E": -1},
+          {"S": -1, "M": [], "E": 2},
+          {"S": -1, "M": [], "E": -2},
+          {"S": -2, "M": [], "E": 3},
+          {"S": -2, "M": [{"x": 730, "y": 510}], "E": 4}
+        ],
+        "junctions": [{"x": 730, "y": 430}, {"x": 730, "y": 430}],
+        "path": {}
+      }
+    },
+    "id25": {
+      "Dyad": {
+        "edges": [{"S": 1, "M": [{"x": 40, "y": 280}, {"x": 40, "y": 270}], "E": 2}],
+        "path": {}
+      }
+    }
+  }
+}
 end

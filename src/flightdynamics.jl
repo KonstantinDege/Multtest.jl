@@ -105,6 +105,7 @@ function trim_glide(prob, L::StateLayout, V;
     x = collect(float.(x0))
     r = residual(x)
     iters = 0
+    singular = false
     for it in 1:maxiter
         iters = it
         norm(r) < tol && break
@@ -113,12 +114,23 @@ function trim_glide(prob, L::StateLayout, V;
             dx = copy(x); h = 1e-7; dx[j] += h
             J[:, j] = (residual(dx) .- r) ./ h
         end
-        x -= J \ r
+        # A singular Jacobian is a legitimate outcome, not a bug: it is what a
+        # control with no authority over the residuals looks like --- asking for
+        # an elevator trim on a tailless aircraft, for instance. Report it as a
+        # failure to converge rather than letting the factorisation throw.
+        step = try
+            J \ r
+        catch err
+            err isa LinearAlgebra.SingularException || rethrow()
+            singular = true
+            break
+        end
+        x -= step
         r = residual(x)
     end
 
-    converged = norm(r) < 1e-9 && abs(x[1]) < gamma_max && abs(x[3]) < control_max &&
-                all(isfinite, x)
+    converged = !singular && norm(r) < 1e-9 && abs(x[1]) < gamma_max &&
+                abs(x[3]) < control_max && all(isfinite, x)
     (gamma = x[1], theta = x[2], control = x[3], x = x,
      alpha = x[2] - x[1], LD = -1 / tan(x[1]), sink = -V * sin(x[1]),
      residual = norm(r), iterations = iters, converged = converged)
