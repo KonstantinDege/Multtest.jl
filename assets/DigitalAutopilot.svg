@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <rect x="90" y="150" width="820" height="700" rx="70" fill="#eef2f5" stroke="#44515d" stroke-width="22"/>
+  <!-- the continuous signal -->
+  <path d="M160 700 C 300 700, 330 360, 480 360 C 640 360, 680 470, 840 470"
+        fill="none" stroke="#9fb3c2" stroke-width="18" stroke-linecap="round"/>
+  <!-- its zero-order hold -->
+  <path d="M160 700 H 250 V 610 H 340 V 470 H 430 V 372 H 520 V 352 H 610 V 392 H 700 V 440 H 790 V 468 H 850"
+        fill="none" stroke="#2f9fd0" stroke-width="24" stroke-linejoin="miter" stroke-linecap="butt"/>
+  <!-- sample instants -->
+  <g fill="#e8663c">
+    <circle cx="250" cy="610" r="19"/><circle cx="340" cy="470" r="19"/>
+    <circle cx="430" cy="372" r="19"/><circle cx="520" cy="352" r="19"/>
+    <circle cx="610" cy="392" r="19"/><circle cx="700" cy="440" r="19"/><circle cx="790" cy="468" r="19"/>
+  </g>
+  <!-- clock -->
+  <circle cx="790" cy="252" r="92" fill="#ffffff" stroke="#44515d" stroke-width="20"/>
+  <g stroke="#44515d" stroke-width="20" stroke-linecap="round">
+    <path d="M790 252 V 196"/><path d="M790 252 L 832 280"/>
+  </g>
+</svg>

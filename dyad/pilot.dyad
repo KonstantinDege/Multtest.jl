@@ -85,7 +85,6 @@ component Pilot
   elevator = RealOutput() {^elevator}
   "Aileron command, positive rolls right"
   aileron = RealOutput() {^aileron}
-
   "Pitch attitude held below the rotation speed; level is the tail-up attitude of a taildragger"
   parameter theta_ground::Angle = 0.0
   "Pitch attitude held above the rotation speed"
@@ -110,7 +109,6 @@ component Pilot
   parameter delta_max::Angle = 0.35
   "Airspeed regularisation, so the speed is differentiable at rest"
   parameter v_eps::Velocity = 0.5
-
   "Velocity of the datum relative to the air mass, world frame"
   variable v_rel_0::Velocity[3]
   "Airspeed"
@@ -130,65 +128,46 @@ component Pilot
   "Bank angle error"
   variable e_phi::Angle
   "Accumulated pitch error, trimmed out by the integral term"
-  variable xi_theta::Real = initial 0.0
+  variable xi_theta::Real(initial = 0.0)
   "Accumulated bank error, trimmed out by the integral term"
-  variable xi_phi::Real = initial 0.0
+  variable xi_phi::Real(initial = 0.0)
 relations
   # A pilot is a sensor: it reads the frame and applies nothing to it
   frame_a.f = [0, 0, 0]
   frame_a.tau = [0, 0, 0]
-
   v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
-  V = sqrt(v_rel_0[1]^2 + v_rel_0[2]^2 + v_rel_0[3]^2 + v_eps^2)
-
+  V = sqrt(v_rel_0[1] ^ 2 + v_rel_0[2] ^ 2 + v_rel_0[3] ^ 2 + v_eps ^ 2)
   # Column 2 of R is the world vertical resolved in body axes, which for the
   # yaw-pitch-roll sequence of this frame convention is
   # [sin(theta), cos(theta)*cos(phi), -cos(theta)*sin(phi)]. Reading the
   # attitude from it is exact for any heading and singular only with the nose
   # straight up, which no take-off reaches.
-  theta = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2]^2 + frame_a.R[3, 2]^2))
+  theta = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2] ^ 2 + frame_a.R[3, 2] ^ 2))
   phi = atan(-frame_a.R[3, 2], frame_a.R[2, 2])
   theta_dot = der(theta)
   phi_dot = der(phi)
-
-  theta_cmd = theta_ground +
-              (theta_climb - theta_ground) * 0.5 * (1 + tanh((V - V_rotate) / V_blend))
-
+  theta_cmd = theta_ground + (theta_climb - theta_ground) * 0.5 * (1 + tanh((V - V_rotate) / V_blend))
   e_theta = theta - theta_cmd
   e_phi = phi - phi_cmd
   elevator = delta_max * tanh((k_theta * (e_theta + xi_theta / T_i) + kd_theta * theta_dot) / delta_max)
   aileron = delta_max * tanh((-k_phi * (e_phi + xi_phi / T_i) - kd_phi * phi_dot) / delta_max)
-
   # Wound at the local gain of the saturation, so the integrator gives up
   # exactly as fast as the control runs out of authority
-  der(xi_theta) = e_theta * (1 - (elevator / delta_max)^2)
-  der(xi_phi) = e_phi * (1 - (aileron / delta_max)^2)
+  der(xi_theta) = e_theta * (1 - (elevator / delta_max) ^ 2)
+  der(xi_phi) = e_phi * (1 - (aileron / delta_max) ^ 2)
 metadata {
-  "Dyad": {
-    "icons": {"default": "dyad://Multtest/Pilot.svg"},
-    "labels": [
-      {"label": "$(instance)", "x": 500, "y": 1100, "rot": 0},
-      {
-        "label": "theta = $(theta_climb)",
-        "x": 500,
-        "y": 1230,
-        "rot": 0,
-        "attrs": {"font-size": "90", "fill": "#6b7a88"}
-      }
-    ]
-  },
   "_links": {
     "frame_a": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 300, "x2": 50, "y2": 400}}}
+      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 450, "y2": 550}}}
     },
     "air": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 600, "x2": 50, "y2": 700}}}
+      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 550, "y1": -50, "y2": 50}}}
     },
     "elevator": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 450, "y2": 550}}}
     },
     "aileron": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}
+      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 170, "y2": 270}}}
     }
   }
 }

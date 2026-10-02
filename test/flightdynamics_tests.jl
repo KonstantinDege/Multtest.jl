@@ -21,10 +21,17 @@ using MultibodyComponents
 using MultibodyComponents: multibody
 using OrdinaryDiffEqDefault
 using LinearAlgebra
+using SynchToolkit
 
 const FD = Multtest
 
-build(nm::Symbol) = multibody(getfield(Multtest, nm)(; name = nm))
+# The DigitalAutopilot's clocked equations need SynchToolkit's synchronous
+# pass. `simplify_model` adds it on its own, but `multibody` does not, and
+# without it a clocked harness dies with HybridSystemNotSupportedException.
+# It is inert on the continuous harnesses -- same unknowns, same equations,
+# same trajectories -- so it is simplest to pass it everywhere.
+build(nm::Symbol) = multibody(getfield(Multtest, nm)(; name = nm);
+                              additional_passes = [SynchToolkit.compile_lustre])
 sim(sys, T; tol = 1e-10, kw...) =
     solve(ODEProblem(sys, [], (0.0, T)), reltol = tol, abstol = tol; kw...)
 
@@ -70,7 +77,12 @@ const V_S_MG = 16.75                 # stall speed, engine off [m/s]
                     :TestMotorGlider => 14, :TestMotorGliderFeathered => 13,
                     :TestMotorGliderParked => 14,
                     # and the pilot's two integrators the fifteenth and sixteenth
-                    :TestMotorGliderClimb => 16, :TestMotorGliderTakeoff => 16)
+                    :TestMotorGliderClimb => 16, :TestMotorGliderTakeoff => 16,
+                    # the digital autopilot keeps its state on the clock, not in
+                    # the continuous state vector, so these are back to fourteen
+                    :TestMotorGliderClimbDigital => 14,
+                    :TestMotorGliderClimbDigitalSlow => 14,
+                    :TestMotorGliderTakeoffDigital => 14)
     for (nm, n) in expected
         sys = build(nm)
         @test length(unknowns(sys)) == n
@@ -728,4 +740,113 @@ end
     # leaves the aircraft in a state the air alone determines from there
     @test attitude(sol, f.frame_a, 60.0).theta ≈ 0.12 rtol = 0.05
     @test sol(60.0, idxs = f.v_0[2]) > 5.0
+end
+
+# ---------------------------------------------------------------------------
+@testset "AttitudeSensor" begin
+    # PHYSICS: the sensor must report exactly the attitude and airspeed that
+    # the frame and the air bus carry, so it is checked against the same
+    # quantities computed independently from the rotation matrix.
+    sys = build(:TestMotorGliderClimbDigital)
+    sol = sim(sys, 20.0; tol = 1e-9)
+    f = sys.glider.fuselage
+    for t in (0.0, 3.0, 9.0, 20.0)
+        a = attitude(sol, f.frame_a, t)
+        @test sol(t, idxs = sys.sensor.theta) ≈ a.theta atol = 1e-12
+        @test sol(t, idxs = sys.sensor.phi) ≈ a.phi atol = 1e-12
+        v = [sol(t, idxs = f.v_0[i]) for i in 1:3]
+        @test sol(t, idxs = sys.sensor.V) ≈ sqrt(v[1]^2 + v[2]^2 + v[3]^2 + 0.5^2) rtol = 1e-10
+    end
+    # PHYSICS: a sensor applies nothing to the frame it reads
+    @test all(abs(sol(5.0, idxs = sys.sensor.frame_a.f[i])) < 1e-12 for i in 1:3)
+    @test all(abs(sol(5.0, idxs = sys.sensor.frame_a.tau[i])) < 1e-12 for i in 1:3)
+end
+
+# ---------------------------------------------------------------------------
+@testset "DigitalAutopilot: sampled and held" begin
+    sys = build(:TestMotorGliderClimbDigitalSlow)      # 1 Hz, so ticks are visible
+    sol = sim(sys, 12.0; tol = 1e-9)
+    Ts = 1.0
+
+    # PHYSICS: the outputs are held between ticks, so they are piecewise
+    # constant -- sampling the same interval twice must give the same number
+    for t0 in (2.0, 5.0, 8.0)
+        a = sol(t0 + 0.2, idxs = sys.ap.elevator)
+        b = sol(t0 + 0.7, idxs = sys.ap.elevator)
+        @test a ≈ b rtol = 1e-9
+    end
+    # PHYSICS: and it does change across a tick boundary
+    @test sol(4.7, idxs = sys.ap.elevator) != sol(5.3, idxs = sys.ap.elevator)
+
+    # PHYSICS: the held value is the control law evaluated at the tick
+    @test sol(5.4, idxs = sys.ap.elevator) ≈ sol(5.0, idxs = sys.ap.de) rtol = 1e-7
+    @test sol(5.4, idxs = sys.ap.aileron) ≈ sol(5.0, idxs = sys.ap.da) rtol = 1e-7
+
+    # PHYSICS: the rate term is a backward difference of the samples, not a
+    # derivative -- this is the defining difference from the continuous Pilot
+    @test sol(5.0, idxs = sys.ap.dtheta) ≈
+          (sol(5.0, idxs = sys.ap.theta_k) - sol(4.0, idxs = sys.ap.theta_k)) / Ts rtol = 1e-6
+
+    # PHYSICS: nothing in the controller enters the continuous state vector
+    @test !any(occursin("ap", string(u)) for u in unknowns(sys))
+end
+
+# ---------------------------------------------------------------------------
+@testset "digital autopilot reproduces the continuous pilot" begin
+    # The two harnesses are identical but for the controller, so any
+    # difference between them is the sampling and nothing else.
+    function climb(nm)
+        sys = build(nm)
+        sol = solve(ODEProblem(sys, [], (0.0, 200.0)), reltol = 1e-9, abstol = 1e-9)
+        f = sys.glider.fuselage
+        th = [rad2deg(attitude(sol, f.frame_a, t).theta) for t in 0:0.02:60]
+        v = [sol(200.0, idxs = f.v_0[i]) for i in 1:3]
+        (retcode = sol.retcode, peak = maximum(th),
+         theta = rad2deg(attitude(sol, f.frame_a, 200.0).theta),
+         V = norm(v), RoC = v[2], phi = attitude(sol, f.frame_a, 200.0).phi)
+    end
+    cont = climb(:TestMotorGliderClimb)
+    fast = climb(:TestMotorGliderClimbDigital)
+    slow = climb(:TestMotorGliderClimbDigitalSlow)
+    for r in (cont, fast, slow)
+        @test r.retcode == ReturnCode.Success
+        # PHYSICS: the integral term does not care how slowly it is ticked, so
+        # every version ends in the same commanded attitude and the same climb
+        @test r.theta ≈ rad2deg(0.12) rtol = 1e-3
+        @test abs(r.phi) < 1e-4
+        @test r.V ≈ 35.385 rtol = 2e-3
+        @test r.RoC ≈ 5.746 rtol = 3e-3
+    end
+    # ANCHOR: at 50 Hz against a ~1.3 rad/s loop the discretisation is
+    # invisible -- the transient matches the continuous one to a millidegree
+    @test fast.peak ≈ cont.peak atol = 0.01
+    # PHYSICS: slowing the clock costs phase, so the overshoot grows. The
+    # zero-order hold is worth about Ts/2 of lag and the rate term becomes a
+    # difference over a whole second.
+    @test slow.peak > cont.peak + 0.05
+end
+
+# ---------------------------------------------------------------------------
+@testset "digital take-off" begin
+    sys = build(:TestMotorGliderTakeoffDigital)
+    sol = solve(ODEProblem(sys, [], (0.0, 60.0)), reltol = 1e-8, abstol = 1e-8)
+    @test sol.retcode == ReturnCode.Success
+    f = sys.glider.fuselage
+    W = M_MG * G
+    ts = range(0, 60, length = 6001)
+    Fn(t) = sol(t, idxs = sys.glider.mainwheel_l.Fn) +
+            sol(t, idxs = sys.glider.mainwheel_r.Fn) +
+            sol(t, idxs = sys.glider.tailwheel.Fn)
+    V(t) = norm([sol(t, idxs = f.v_0[i]) for i in 1:3])
+    t_lift = ts[findfirst(t -> Fn(t) < 0.01W, ts)]
+
+    # ANCHOR: the same take-off the continuous pilot flies, to within the
+    # resolution of a 50 Hz loop
+    @test t_lift ≈ 12.0 rtol = 0.05
+    @test sol(t_lift, idxs = f.r_0[1]) ≈ 165.0 rtol = 0.05
+    @test V(t_lift) ≈ 27.0 rtol = 0.03
+    # PHYSICS: still flown straight, and still inside the control travel
+    @test maximum(abs(attitude(sol, f.frame_a, t).phi) for t in ts) < deg2rad(1.0)
+    @test maximum(abs(sol(t, idxs = sys.ap.elevator)) for t in ts) < deg2rad(10.0)
+    @test attitude(sol, f.frame_a, 60.0).theta ≈ 0.12 rtol = 0.05
 end

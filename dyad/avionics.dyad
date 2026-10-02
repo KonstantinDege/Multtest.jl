@@ -1,0 +1,185 @@
+"""
+Attitude and airspeed reference: the sensing half of an autopilot.
+
+This is the continuous part of a flight control system --- an attitude and
+heading reference unit with a pitot source. It reads the aircraft datum frame
+and the air mass and publishes pitch, bank and airspeed as ordinary signals.
+
+Splitting it out from the controller is not cosmetic. A digital autopilot is
+a signal processor: it cannot reach into a multibody frame, it reads whatever
+the sensors hand it. Keeping the frame algebra on this side leaves the
+controller a pure signal block, which is both how the hardware is arranged
+and what makes a sampled implementation possible at all.
+
+# Reading attitude from the frame
+
+Column 2 of `frame_a.R` is the world vertical resolved in body axes, which
+for the yaw-pitch-roll sequence of this frame convention is
+
+    [sin(theta), cos(theta)*cos(phi), -cos(theta)*sin(phi)]
+
+so pitch and bank come straight out of it. This is exact at any heading and
+singular only with the nose straight up.
+
+No sensor error is modelled --- no bias, no noise, no lag. Those belong here
+rather than in the controller when they are wanted.
+"""
+component AttitudeSensor
+  "Mount on the aircraft datum"
+  frame_a = Frame3D() {^frame_a}
+  "Density and wind, so the airspeed is true airspeed and not ground speed"
+  air = AirState() {^air}
+  "Pitch attitude, positive nose up"
+  theta = RealOutput() {^theta}
+  "Bank angle, positive right wing down"
+  phi = RealOutput() {^phi}
+  "Airspeed"
+  V = RealOutput() {^V}
+
+  "Airspeed regularisation, so the speed stays differentiable at rest"
+  parameter v_eps::Velocity = 0.5
+
+  "Velocity of the datum relative to the air mass, world frame"
+  variable v_rel_0::Velocity[3]
+relations
+  # A sensor applies nothing to the frame it reads
+  frame_a.f = [0, 0, 0]
+  frame_a.tau = [0, 0, 0]
+
+  v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
+  V = sqrt(v_rel_0[1]^2 + v_rel_0[2]^2 + v_rel_0[3]^2 + v_eps^2)
+  theta = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2]^2 + frame_a.R[3, 2]^2))
+  phi = atan(-frame_a.R[3, 2], frame_a.R[2, 2])
+metadata {
+  "Dyad": {"icons": {"default": "dyad://Multtest/AttitudeSensor.svg"}},
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 300, "x2": 50, "y2": 400}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 600, "x2": 50, "y2": 700}}}
+    },
+    "theta": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 200, "x2": 1050, "y2": 300}}}
+    },
+    "phi": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}
+    },
+    "V": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 700, "x2": 1050, "y2": 800}}}
+    }
+  }
+}
+end
+
+"""
+Sampled-data attitude hold: the same two loops as `Pilot`, running on a clock.
+
+# What is different from `Pilot`, and why it matters
+
+`Pilot` is a continuous controller --- a reasonable model of a human, who is
+not sampled. A flight computer is sampled, and three things change when you
+say so rather than assuming the difference away:
+
+* **The rate terms become backward differences of the sampled attitude**,
+  `(theta_k - theta_k-1)/Ts`, not `der(theta)`. A digital controller cannot
+  differentiate a continuous signal; it differences successive samples. This
+  removes the continuous derivative from the loop entirely.
+* **The integral becomes an explicit Euler sum**, `xi_k = xi_k-1 + Ts*e_k`,
+  and the anti-windup factor has to read the *previous* output, because a
+  causal discrete loop cannot use the output it is in the middle of computing.
+* **The outputs are held between ticks.** The zero-order hold is explicit, so
+  the roughly `Ts/2` of phase lag it costs is in the model rather than absent
+  from it.
+
+Everything else --- the gains, the `tanh` saturation, the rotation on
+airspeed rather than on a clock time --- is carried over unchanged, so that
+at a fast sample rate this reproduces `Pilot` and any difference between the
+two is the sampling and nothing else.
+
+# Implementation
+
+Declared `external` and implemented in `dyad/digital_autopilot.jl`. The
+clocked equations themselves are perfectly expressible --- Dyad has the shift
+syntax (`x@(c - 1)`) and clock parameters (`@[input c]`) --- but this kernel
+has no way to bind a concrete periodic clock to such a parameter, so the
+partition comes out as an unresolved `InferredDiscrete` and compilation
+fails. Writing the equations in Julia against `Clock(Ts)` is what pins the
+rate. The semantics are the same synchronous ones either way.
+
+# Sample period
+
+`Ts` is a **structural** parameter: the clock is constructed when the
+component is built, so changing the rate rebuilds the model rather than
+re-running it.
+"""
+external component DigitalAutopilot
+  "Measured pitch attitude"
+  theta = RealInput() {^theta}
+  "Measured bank angle"
+  phi = RealInput() {^phi}
+  "Measured airspeed"
+  V = RealInput() {^V}
+  "Elevator command, positive trailing edge down, held between ticks"
+  elevator = RealOutput() {^elevator}
+  "Aileron command, positive rolls right, held between ticks"
+  aileron = RealOutput() {^aileron}
+
+  "Sample period; the clock is built with the component, so this is structural"
+  structural parameter Ts::Real = 0.02
+  "Pitch attitude held below the rotation speed"
+  parameter theta_ground::Angle = 0.0
+  "Pitch attitude held above the rotation speed"
+  parameter theta_climb::Angle = 0.12
+  "Airspeed at which the aircraft is rotated"
+  parameter V_rotate::Velocity = 22.0
+  "Width of the blend between the two commanded attitudes"
+  parameter V_blend::Velocity = 1.5
+  "Bank angle held throughout, positive right wing down"
+  parameter phi_cmd::Angle = 0.0
+  "Elevator per radian of pitch error"
+  parameter k_theta::Real = 0.25
+  "Elevator per radian per second of pitch rate"
+  parameter kd_theta::Real = 0.06
+  "Aileron per radian of bank error"
+  parameter k_phi::Real = 0.35
+  "Aileron per radian per second of roll rate"
+  parameter kd_phi::Real = 0.05
+  "Time over which a standing attitude error is trimmed away, both axes"
+  parameter T_i::Real = 4.0
+  "Control deflection limit, both axes"
+  parameter delta_max::Angle = 0.35
+relations
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/DigitalAutopilot.svg"},
+    "labels": [
+      {"label": "$(instance)", "x": 500, "y": 1100, "rot": 0},
+      {
+        "label": "Ts = $(Ts)",
+        "x": 500,
+        "y": 1230,
+        "rot": 0,
+        "attrs": {"font-size": "90", "fill": "#6b7a88"}
+      }
+    ]
+  },
+  "_links": {
+    "theta": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 200, "x2": 50, "y2": 300}}}
+    },
+    "phi": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}
+    },
+    "V": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 700, "x2": 50, "y2": 800}}}
+    },
+    "elevator": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}
+    },
+    "aileron": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}
+    }
+  }
+}
+end

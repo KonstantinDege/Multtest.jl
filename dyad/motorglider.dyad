@@ -306,6 +306,139 @@ metadata {
 end
 
 """
+The climb, flown by a sampled flight computer instead of by `Pilot`.
+
+Identical to `TestMotorGliderClimb` in every respect except that the loops run
+on a 50 Hz clock with the attitude read through an `AttitudeSensor` and the
+controls held between ticks. The gains are the same, so whatever differs
+between this and the continuous harness is the sampling and nothing else ---
+which is the point of having both.
+
+At 50 Hz against a loop with about 1.3 rad/s of bandwidth the discretisation
+should be close to invisible. `TestMotorGliderClimbDigitalSlow` is the same
+aircraft with the clock slowed until it is not.
+"""
+test component TestMotorGliderClimbDigital
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider(V_start = 30.0, gamma_start = 0.0, theta_start = 0.0) {^glider}
+  "Attitude and airspeed reference"
+  sensor = AttitudeSensor() {^sensor}
+  "50 Hz sampled attitude hold"
+  ap = DigitalAutopilot(Ts = 0.02, theta_climb = 0.12, V_rotate = 22.0) {^ap}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+relations
+  connect(atm.air, glider.air, sensor.air) {^id1}
+  connect(glider.frame_datum, sensor.frame_a) {^id2}
+  connect(sensor.theta, ap.theta) {^id3}
+  connect(sensor.phi, ap.phi) {^id4}
+  connect(sensor.V, ap.V) {^id5}
+  connect(ap.elevator, glider.elevator) {^id6}
+  connect(ap.aileron, glider.aileron) {^id7}
+  connect(rud.y, glider.rudder) {^id8}
+  connect(thr.y, glider.throttle) {^id9}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 40, "y1": 820, "x2": 140, "y2": 920}}}},
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 20, "x2": 520, "y2": 120}}}},
+    "glider": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 300, "x2": 520, "y2": 400}}}},
+    "sensor": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 300, "x2": 800, "y2": 400}}}},
+    "ap": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 560, "x2": 800, "y2": 660}}}},
+    "rud": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 420, "x2": 200, "y2": 520}}}},
+    "thr": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 580, "x2": 200, "y2": 680}}}}
+  }
+}
+end
+
+"""
+The same sampled flight computer, with the clock slowed to 1 Hz.
+
+One hertz is far below anything a real flight computer runs at; it is here to
+make the cost of sampling visible rather than to represent a plausible
+machine. Against the continuous `Pilot` and the 50 Hz harness the loop should
+show a larger overshoot on the way to the commanded attitude, because the
+zero-order hold costs about `Ts/2` of phase and the rate term is now a
+difference over a full second rather than a derivative.
+
+The steady climb it ends in is the same one: the integral term does not care
+how slowly it is ticked.
+"""
+test component TestMotorGliderClimbDigitalSlow
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider(V_start = 30.0, gamma_start = 0.0, theta_start = 0.0) {^glider}
+  sensor = AttitudeSensor() {^sensor}
+  "1 Hz: deliberately slow, to expose the sampling"
+  ap = DigitalAutopilot(Ts = 1.0, theta_climb = 0.12, V_rotate = 22.0) {^ap}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+relations
+  connect(atm.air, glider.air, sensor.air) {^id1}
+  connect(glider.frame_datum, sensor.frame_a) {^id2}
+  connect(sensor.theta, ap.theta) {^id3}
+  connect(sensor.phi, ap.phi) {^id4}
+  connect(sensor.V, ap.V) {^id5}
+  connect(ap.elevator, glider.elevator) {^id6}
+  connect(ap.aileron, glider.aileron) {^id7}
+  connect(rud.y, glider.rudder) {^id8}
+  connect(thr.y, glider.throttle) {^id9}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 40, "y1": 820, "x2": 140, "y2": 920}}}},
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 20, "x2": 520, "y2": 120}}}},
+    "glider": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 300, "x2": 520, "y2": 400}}}},
+    "sensor": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 300, "x2": 800, "y2": 400}}}},
+    "ap": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 560, "x2": 800, "y2": 660}}}},
+    "rud": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 420, "x2": 200, "y2": 520}}}},
+    "thr": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 580, "x2": 200, "y2": 680}}}}
+  }
+}
+end
+
+"""
+The take-off, flown by the 50 Hz flight computer.
+
+The counterpart to `TestMotorGliderTakeoff`: same aircraft, same gear, same
+schedule of a tail-up attitude through the roll and a rotation at 22 m/s, but
+with every control deflection computed on a clock and held between ticks.
+"""
+test component TestMotorGliderTakeoffDigital
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  "Started from the settled parked attitude found by TestMotorGliderParked"
+  glider = MotorGlider(has_gear = true, V_start = 0.0, gamma_start = 0.0,
+                       theta_start = 0.11327, r_start = [0.0, 0.7805, 0.0]) {^glider}
+  sensor = AttitudeSensor() {^sensor}
+  "Tail up through the roll, rotate at 22 m/s, then hold the climb attitude"
+  ap = DigitalAutopilot(Ts = 0.02, theta_ground = 0.0, theta_climb = 0.12, V_rotate = 22.0) {^ap}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  "Full throttle from the start"
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+relations
+  connect(atm.air, glider.air, sensor.air) {^id1}
+  connect(glider.frame_datum, sensor.frame_a) {^id2}
+  connect(sensor.theta, ap.theta) {^id3}
+  connect(sensor.phi, ap.phi) {^id4}
+  connect(sensor.V, ap.V) {^id5}
+  connect(ap.elevator, glider.elevator) {^id6}
+  connect(ap.aileron, glider.aileron) {^id7}
+  connect(rud.y, glider.rudder) {^id8}
+  connect(thr.y, glider.throttle) {^id9}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 40, "y1": 820, "x2": 140, "y2": 920}}}},
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 20, "x2": 520, "y2": 120}}}},
+    "glider": {"Dyad": {"placement": {"diagram": {"x1": 420, "y1": 300, "x2": 520, "y2": 400}}}},
+    "sensor": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 300, "x2": 800, "y2": 400}}}},
+    "ap": {"Dyad": {"placement": {"diagram": {"x1": 700, "y1": 560, "x2": 800, "y2": 660}}}},
+    "rud": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 420, "x2": 200, "y2": 520}}}},
+    "thr": {"Dyad": {"placement": {"diagram": {"x1": 100, "y1": 580, "x2": 200, "y2": 680}}}}
+  }
+}
+end
+
+"""
 The same airframe with no propeller at all, which is the configuration the
 reference polar describes: engine off and propeller stopped or feathered.
 
