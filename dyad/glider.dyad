@@ -415,22 +415,58 @@ relations
     connect(rudder, vtail.delta_l)
   end
 metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/Glider.svg"},
+    "doc": {"behavior": false}
+  },
   "_links": {
     "air": {
-      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 850, "y2": 950}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50},
+          "diagram": {"x1": -60, "x2": 40, "y1": 850, "y2": 950}
+        }
+      }
     },
     "elevator": {
-      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 660, "y2": 760}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": -50, "y1": 180, "x2": 50, "y2": 280},
+          "diagram": {"x1": -60, "x2": 40, "y1": 660, "y2": 760}
+        }
+      }
     },
-    "rudder": {"Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 20, "y2": 120}}}},
+    "rudder": {
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": -50, "y1": 360, "x2": 50, "y2": 460},
+          "diagram": {"x1": -60, "x2": 40, "y1": 20, "y2": 120}
+        }
+      }
+    },
     "aileron": {
-      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 470, "y2": 570}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": -50, "y1": 540, "x2": 50, "y2": 640},
+          "diagram": {"x1": -60, "x2": 40, "y1": 470, "y2": 570}
+        }
+      }
     },
     "throttle": {
-      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 220, "y2": 320}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": -50, "y1": 720, "x2": 50, "y2": 820},
+          "diagram": {"x1": -60, "x2": 40, "y1": 220, "y2": 320}
+        }
+      }
     },
     "frame_datum": {
-      "Dyad": {"placement": {"diagram": {"x1": 770, "x2": 870, "y1": 610, "y2": 710}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550},
+          "diagram": {"x1": 770, "x2": 870, "y1": 610, "y2": 710}
+        }
+      }
     },
     "fuselage": {
       "Dyad": {"placement": {"diagram": {"x1": 730, "x2": 830, "y1": 480, "y2": 580}}}
