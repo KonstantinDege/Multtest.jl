@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- plan view, nose to the right -->
+  <path d="M462 500 L 652 500 L 624 52 L 510 52 Z" fill="#d8dee4" stroke="#44515d" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M462 500 L 652 500 L 624 948 L 510 948 Z" fill="#d8dee4" stroke="#44515d" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M225 500 L 355 500 L 342 268 L 240 268 Z" fill="#d8dee4" stroke="#44515d" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M225 500 L 355 500 L 342 732 L 240 732 Z" fill="#d8dee4" stroke="#44515d" stroke-width="16" stroke-linejoin="round"/>
+  <rect x="196" y="456" width="618" height="88" rx="44" fill="#eef2f5" stroke="#44515d" stroke-width="16"/>
+  <ellipse cx="862" cy="500" rx="30" ry="290" fill="#2f9fd0" opacity="0.25"/>
+  <rect x="846" y="212" width="32" height="576" rx="16" fill="#44515d"/>
+  <circle cx="862" cy="500" r="56" fill="#44515d"/>
+</svg>

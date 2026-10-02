@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <circle cx="500" cy="500" r="398" fill="#8a6a46"/>
+  <path d="M102 500 A 398 398 0 0 1 898 500 Z" fill="#2f9fd0"/>
+  <rect x="102" y="488" width="796" height="24" fill="#ffffff"/>
+  <circle cx="500" cy="500" r="398" fill="none" stroke="#44515d" stroke-width="32"/>
+  <g stroke="#ffd34d" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M248 500 H 388"/>
+    <path d="M612 500 H 752"/>
+    <path d="M388 500 L 452 562 L 548 562 L 612 500"/>
+  </g>
+  <circle cx="500" cy="500" r="28" fill="#ffd34d"/>
+  <polygon points="500,78 452,162 548,162" fill="#ffd34d" stroke="#44515d" stroke-width="14" stroke-linejoin="round"/>
+</svg>

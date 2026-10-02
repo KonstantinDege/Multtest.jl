@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <circle cx="500" cy="500" r="415" fill="#2f9fd0" opacity="0.13"/>
+  <circle cx="500" cy="500" r="415" fill="none" stroke="#2f9fd0" stroke-width="14" stroke-dasharray="48 42"/>
+  <!-- two bowed blades, opposite camber so they read as blades not a bar -->
+  <path d="M462 452 C 430 330, 450 185, 560 92 C 598 220, 566 360, 538 456 Z"
+        fill="#d8dee4" stroke="#44515d" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M538 548 C 570 670, 550 815, 440 908 C 402 780, 434 640, 462 544 Z"
+        fill="#d8dee4" stroke="#44515d" stroke-width="18" stroke-linejoin="round"/>
+  <circle cx="500" cy="500" r="104" fill="#c3ccd4" stroke="#44515d" stroke-width="20"/>
+  <circle cx="500" cy="500" r="34" fill="#44515d"/>
+  <path d="M784 232 A 382 382 0 0 1 876 450" fill="none" stroke="#e8663c" stroke-width="24" stroke-linecap="round"/>
+  <polygon points="892,542 831,448 926,438" fill="#e8663c"/>
+</svg>

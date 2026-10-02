@@ -1,0 +1,352 @@
+"""
+Two-seat touring motor glider, parameterised against the Scheibe SF 25 C Falke.
+
+This is the `Glider` component with the engine fitted and the airframe
+re-sized; nothing in the structure changes, only the numbers. Keeping it as an
+`extends` means the pure-glider configuration and its validation stay intact.
+
+# What was matched, and what could not be
+
+The reference data in `assets/data/scheibe_sf25c_technical_simulation.md` is
+not self-consistent, so a choice had to be made about which parts to honour.
+
+The **engine-off polar is the trustworthy part**. Its three points imply a
+weight of 468 kg to within 0.3% of each other, and they fit a parabola to
+better than 4%, giving `CD0 = 0.0164` and `e = 0.852`. That is what this model
+reproduces, at `m_total = 468 kg`.
+
+Three things in the document could not be matched because they contradict it:
+
+* **Aspect ratio.** The stated 13.80 does not follow from the stated span and
+  area: `15.30^2/18.20 = 12.86`. Span and area are the more primitive numbers,
+  so they win and the aspect ratio comes out at 12.86.
+* **Minimum sink.** The quoted 1.10 and 1.15 m/s at 75 and 90 km/h disagree
+  with `V/(L/D)` computed from the document's own lift and drag coefficients,
+  which give 0.94 and 1.06. Only the 120 km/h point is consistent, where the
+  quoted 1.89 matches exactly. This model follows the coefficients.
+* **Cruise speed.** At 145 km/h and maximum take-off weight the airframe needs
+  362 N of thrust, while 75% of an 80 hp engine at the quoted 0.70 propeller
+  efficiency delivers 777 N --- more than twice what is required, and the
+  quoted cruise would need only about 28 hp. Rather than inflate the drag to
+  force the number, the propeller is sized from real geometry and rated power,
+  and the resulting speed is whatever it is. Expect level flight at full
+  throttle to run well past the quoted cruise and up towards VNE, which is why
+  a real one cruises at part throttle.
+
+Stall at 60 km/h implies `CL_max = 1.48` at the polar weight, which is a
+reasonable figure for this wing. At the 650 kg maximum take-off weight the same
+speed would need 2.06, which no unflapped wing reaches --- more evidence the
+quoted figures all belong to the lighter condition.
+
+# Mass
+
+`m_total = 468 kg` is the weight the polar was computed at, not the 650 kg
+maximum take-off weight. Raise `m_fuselage` to explore heavier loadings; the
+centre of gravity stays on the datum automatically because the fuselage mass is
+placed to balance the aircraft.
+"""
+component MotorGlider
+  extends Glider(has_engine = true, b_wing = 15.30, S_wing = 18.20, m_wing = 110.0, dihedral_wing = 0.060, x_ac_wing = 0.100, incidence_wing = 0.05236, CL0_wing = 0.30, CL_alpha_wing = 5.31, CD0_wing = 0.0090, CM0_wing = -0.075, e_oswald_wing = 0.852, alpha_stall_wing = 0.295, b_htail = 3.00, S_htail = 2.00, x_ac_htail = -4.20, y_ac_htail = 0.30, m_htail = 15.0, b_vtail = 1.40, S_vtail = 1.05, x_ac_vtail = -4.00, y_ac_vtail = 0.35, m_vtail = 10.0, m_fuselage = 333.0, I_fus_roll = 60.0, I_fus_pitch = 900.0, I_fus_yaw = 900.0, l_fuselage = 7.60, radius_fuselage = 0.45, x_cp_fuselage = 0.30, CdA_fus_x = 0.108, CdA_fus_y = 2.6, CdA_fus_z = 2.9, x_prop = 2.20, y_prop = 0.20, D_prop = 1.50, P_engine = 59700.0, n_rated_engine = 45.0, I_shaft_engine = 0.35, V_start = 25.0)
+relations
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/MotorGlider.svg"},
+    "doc": {"behavior": false}
+  }
+}
+end
+
+"""
+The motor glider in free flight with the throttle closed.
+
+With no power the propeller windmills rather than stopping, which costs real
+drag, so this is *not* the clean sailplane polar --- compare it against
+`TestMotorGliderFeathered` to see what the windmilling propeller takes away.
+"""
+test component TestMotorGlider
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider() {^glider}
+  elev = BlockComponents.Sources.Constant(k = 0.0) {^elev}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  ail = BlockComponents.Sources.Constant(k = 0.0) {^ail}
+  thr = BlockComponents.Sources.Constant(k = 0.0) {^thr}
+relations
+  connect(atm.air, glider.air) {^id8}
+  connect(elev.y, glider.elevator) {^id9}
+  connect(rud.y, glider.rudder) {^id10}
+  connect(ail.y, glider.aileron) {^id11}
+  connect(thr.y, glider.throttle) {^id12}
+metadata {
+  "_links": {
+    "world": {
+      "Dyad": {"placement": {"diagram": {"x1": 150, "y1": 700, "x2": 250, "y2": 800}}}
+    },
+    "atm": {
+      "Dyad": {"placement": {"diagram": {"x1": 880, "y1": 110, "x2": 980, "y2": 210}}}
+    },
+    "glider": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "y1": 110, "x2": 550, "y2": 210}}}
+    },
+    "elev": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 340, "x2": 255, "y2": 440}}}
+    },
+    "rud": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 180, "x2": 255, "y2": 280}}}
+    },
+    "ail": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 20, "x2": 255, "y2": 120}}}
+    },
+    "thr": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 500, "x2": 255, "y2": 600}}}
+    },
+    "id8": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id9": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 400, "y": 390}], "E": 2}]}},
+    "id10": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 370, "y": 230}], "E": 2}]}},
+    "id11": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 340, "y": 70}], "E": 2}]}},
+    "id12": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 430, "y": 550}], "E": 2}]}}
+  }
+}
+end
+
+"""
+Sitting on the ground, engine off, released a little above its wheels.
+
+A taildragger: the main wheels hang further below the datum than the tailwheel
+does, so it settles nose-up on all three. With the main wheels on a track it
+stands up by itself and the wing tip skids stay unloaded --- they are there for
+a dropped wing, not to hold it up.
+"""
+test component TestMotorGliderParked
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider(has_gear = true, V_start = 0.0, gamma_start = 0.0, theta_start = 0.12, r_start = [0.0, 0.95, 0.0]) {^glider}
+  elev = BlockComponents.Sources.Constant(k = 0.0) {^elev}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  ail = BlockComponents.Sources.Constant(k = 0.0) {^ail}
+  thr = BlockComponents.Sources.Constant(k = 0.0) {^thr}
+relations
+  connect(atm.air, glider.air) {^id8}
+  connect(elev.y, glider.elevator) {^id9}
+  connect(rud.y, glider.rudder) {^id10}
+  connect(ail.y, glider.aileron) {^id11}
+  connect(thr.y, glider.throttle) {^id12}
+metadata {
+  "_links": {
+    "world": {
+      "Dyad": {"placement": {"diagram": {"x1": 150, "y1": 700, "x2": 250, "y2": 800}}}
+    },
+    "atm": {
+      "Dyad": {"placement": {"diagram": {"x1": 880, "y1": 110, "x2": 980, "y2": 210}}}
+    },
+    "glider": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "y1": 110, "x2": 550, "y2": 210}}}
+    },
+    "elev": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 340, "x2": 255, "y2": 440}}}
+    },
+    "rud": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 180, "x2": 255, "y2": 280}}}
+    },
+    "ail": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 20, "x2": 255, "y2": 120}}}
+    },
+    "thr": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 500, "x2": 255, "y2": 600}}}
+    },
+    "id8": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id9": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 400, "y": 390}], "E": 2}]}},
+    "id10": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 370, "y": 230}], "E": 2}]}},
+    "id11": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 340, "y": 70}], "E": 2}]}},
+    "id12": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 430, "y": 550}], "E": 2}]}}
+  }
+}
+end
+
+"""
+Take-off run from a standstill: full throttle from rest, flown by the `Pilot`.
+
+The whole chain has to work together for this to mean anything --- static
+thrust from the propeller, rolling friction and lateral restraint from the
+gear, the tail coming up as elevator authority builds with airspeed, and the
+wing taking the weight off the wheels until the contacts release cleanly.
+
+The aircraft is *flown*, not released with a fixed stick. A fixed stick cannot
+keep this aeroplane straight: the propeller torque reaction rolls it to the
+left with nothing opposing it, and the spiral mode is divergent, so an
+open-loop run leaves the ground correctly and then departs into a climbing
+left turn --- which is a real result about the aircraft, but makes a poor
+take-off. The pilot holds the tail-up attitude through the roll, rotates at
+22 m/s and then holds the climb attitude with the wings level.
+"""
+test component TestMotorGliderTakeoff
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  "Started from the settled parked attitude found by TestMotorGliderParked"
+  glider = MotorGlider(has_gear = true, V_start = 0.0, gamma_start = 0.0, theta_start = 0.11327, r_start = [0.0, 0.7805, 0.0]) {^glider}
+  "Tail up through the roll, rotate at 22 m/s, then hold 7 degrees of climb"
+  pilot = Pilot(theta_ground = 0.0, theta_climb = 0.12, V_rotate = 22.0) {^pilot}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  "Full throttle from the start"
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+relations
+  connect(atm.air, glider.air, pilot.air) {^id7}
+  connect(glider.frame_datum, pilot.frame_a) {^id8}
+  connect(pilot.elevator, glider.elevator) {^id9}
+  connect(pilot.aileron, glider.aileron) {^id10}
+  connect(rud.y, glider.rudder) {^id11}
+  connect(thr.y, glider.throttle) {^id12}
+metadata {
+  "_links": {
+    "world": {
+      "Dyad": {"placement": {"diagram": {"x1": 60, "y1": 800, "x2": 160, "y2": 900}}}
+    },
+    "atm": {
+      "Dyad": {"placement": {"diagram": {"x1": 460, "y1": 20, "x2": 560, "y2": 120}}}
+    },
+    "glider": {
+      "Dyad": {"placement": {"diagram": {"x1": 460, "y1": 300, "x2": 560, "y2": 400}}}
+    },
+    "pilot": {
+      "Dyad": {"placement": {"diagram": {"x1": 820, "y1": 300, "x2": 920, "y2": 400}}}
+    },
+    "rud": {
+      "Dyad": {"placement": {"diagram": {"x1": 120, "y1": 420, "x2": 220, "y2": 520}}}
+    },
+    "thr": {
+      "Dyad": {"placement": {"diagram": {"x1": 120, "y1": 580, "x2": 220, "y2": 680}}}
+    },
+    "id7": {
+      "Dyad": {
+        "edges": [
+          {"S": 1, "M": [], "E": -1},
+          {"S": -1, "M": [], "E": 2},
+          {"S": -1, "M": [{"x": 870, "y": 170}], "E": 3}
+        ],
+        "junctions": [{"x": 510, "y": 170}]
+      }
+    },
+    "id8": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id9": {
+      "Dyad": {"edges": [{"S": 1, "M": [{"x": 960, "y": 250}, {"x": 400, "y": 250}], "E": 2}]}
+    },
+    "id10": {
+      "Dyad": {"edges": [{"S": 1, "M": [{"x": 960, "y": 470}, {"x": 400, "y": 470}], "E": 2}]}
+    },
+    "id11": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 380, "y": 470}], "E": 2}]}},
+    "id12": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 340, "y": 630}], "E": 2}]}}
+  }
+}
+end
+
+"""
+Full-throttle climb from a level release, flown to a held attitude.
+
+The same pilot as the take-off but with no ground underneath, which is how the
+two attitude loops are checked on their own: the aircraft must settle into a
+steady climb at a constant speed with the wings level, rather than phugoiding
+or rolling off under the propeller torque.
+"""
+test component TestMotorGliderClimb
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider(V_start = 30.0, gamma_start = 0.0, theta_start = 0.0) {^glider}
+  "Already above the rotation speed, so the climb attitude is commanded throughout"
+  pilot = Pilot(theta_climb = 0.12, V_rotate = 22.0) {^pilot}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+relations
+  connect(atm.air, glider.air, pilot.air) {^id7}
+  connect(glider.frame_datum, pilot.frame_a) {^id8}
+  connect(pilot.elevator, glider.elevator) {^id9}
+  connect(pilot.aileron, glider.aileron) {^id10}
+  connect(rud.y, glider.rudder) {^id11}
+  connect(thr.y, glider.throttle) {^id12}
+metadata {
+  "_links": {
+    "world": {
+      "Dyad": {"placement": {"diagram": {"x1": 60, "y1": 800, "x2": 160, "y2": 900}}}
+    },
+    "atm": {
+      "Dyad": {"placement": {"diagram": {"x1": 460, "y1": 20, "x2": 560, "y2": 120}}}
+    },
+    "glider": {
+      "Dyad": {"placement": {"diagram": {"x1": 460, "y1": 300, "x2": 560, "y2": 400}}}
+    },
+    "pilot": {
+      "Dyad": {"placement": {"diagram": {"x1": 820, "y1": 300, "x2": 920, "y2": 400}}}
+    },
+    "rud": {
+      "Dyad": {"placement": {"diagram": {"x1": 120, "y1": 420, "x2": 220, "y2": 520}}}
+    },
+    "thr": {
+      "Dyad": {"placement": {"diagram": {"x1": 120, "y1": 580, "x2": 220, "y2": 680}}}
+    },
+    "id7": {
+      "Dyad": {
+        "edges": [
+          {"S": 1, "M": [], "E": -1},
+          {"S": -1, "M": [], "E": 2},
+          {"S": -1, "M": [{"x": 870, "y": 170}], "E": 3}
+        ],
+        "junctions": [{"x": 510, "y": 170}]
+      }
+    },
+    "id8": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id9": {
+      "Dyad": {"edges": [{"S": 1, "M": [{"x": 960, "y": 250}, {"x": 400, "y": 250}], "E": 2}]}
+    },
+    "id10": {
+      "Dyad": {"edges": [{"S": 1, "M": [{"x": 960, "y": 470}, {"x": 400, "y": 470}], "E": 2}]}
+    },
+    "id11": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 380, "y": 470}], "E": 2}]}},
+    "id12": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 340, "y": 630}], "E": 2}]}}
+  }
+}
+end
+
+"""
+The same airframe with no propeller at all, which is the configuration the
+reference polar describes: engine off and propeller stopped or feathered.
+
+This is the harness to compare against the document's glide figures.
+"""
+test component TestMotorGliderFeathered
+  world = MultibodyComponents.World() {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  glider = MotorGlider(has_engine = false) {^glider}
+  elev = BlockComponents.Sources.Constant(k = 0.0) {^elev}
+  rud = BlockComponents.Sources.Constant(k = 0.0) {^rud}
+  ail = BlockComponents.Sources.Constant(k = 0.0) {^ail}
+relations
+  connect(atm.air, glider.air) {^id7}
+  connect(elev.y, glider.elevator) {^id8}
+  connect(rud.y, glider.rudder) {^id9}
+  connect(ail.y, glider.aileron) {^id10}
+metadata {
+  "_links": {
+    "world": {
+      "Dyad": {"placement": {"diagram": {"x1": 150, "y1": 540, "x2": 250, "y2": 640}}}
+    },
+    "atm": {
+      "Dyad": {"placement": {"diagram": {"x1": 880, "y1": 110, "x2": 980, "y2": 210}}}
+    },
+    "glider": {
+      "Dyad": {"placement": {"diagram": {"x1": 450, "y1": 110, "x2": 550, "y2": 210}}}
+    },
+    "elev": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 350, "x2": 255, "y2": 450}}}
+    },
+    "rud": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 230, "x2": 255, "y2": 330}}}
+    },
+    "ail": {
+      "Dyad": {"placement": {"diagram": {"x1": 155, "y1": 20, "x2": 255, "y2": 120}}}
+    },
+    "id7": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id8": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 525, "y": 400}], "E": 2}]}},
+    "id9": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 475, "y": 280}], "E": 2}]}},
+    "id10": {"Dyad": {"edges": [{"S": 1, "M": [{"x": 462, "y": 70}], "E": 2}]}}
+  }
+}
+end

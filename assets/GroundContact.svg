@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- strut and spring -->
+  <rect x="488" y="55" width="26" height="110" rx="13" fill="#44515d"/>
+  <rect x="395" y="152" width="212" height="26" rx="13" fill="#44515d"/>
+  <g fill="none" stroke="#44515d" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M430 178 V 215"/>
+    <path d="M570 178 V 215"/>
+    <path d="M430 215 L 570 258 L 430 301 L 570 344 L 430 387 L 570 420"/>
+    <path d="M430 420 H 570"/>
+    <path d="M500 420 V 468"/>
+  </g>
+  <!-- wheel -->
+  <circle cx="500" cy="655" r="188" fill="#3b4147" stroke="#20252a" stroke-width="18"/>
+  <circle cx="500" cy="655" r="76" fill="#c3ccd4" stroke="#44515d" stroke-width="16"/>
+  <!-- ground -->
+  <rect x="40" y="850" width="920" height="24" rx="12" fill="#5e6b3c"/>
+  <g stroke="#8a9a63" stroke-width="18" stroke-linecap="round">
+    <path d="M78 946 L 146 874"/><path d="M198 946 L 266 874"/><path d="M318 946 L 386 874"/>
+    <path d="M438 946 L 506 874"/><path d="M558 946 L 626 874"/><path d="M678 946 L 746 874"/>
+    <path d="M798 946 L 866 874"/><path d="M898 930 L 952 874"/>
+  </g>
+</svg>

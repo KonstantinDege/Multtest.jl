@@ -1,0 +1,228 @@
+"""
+Fixed-pitch propeller driven by a piston engine, with the shaft speed as a
+state.
+
+# Why the shaft speed is a state
+
+The obvious model, `T = eta*P/V`, is singular at zero airspeed and so cannot
+be used for a take-off roll. Momentum theory fixes that but needs an implicit
+solve for the induced velocity. Carrying the shaft speed instead keeps the
+whole thing an ODE, gives a finite and correct static thrust, and comes with
+throttle lag for free through the shaft inertia.
+
+It also makes the engine-off case work without any special handling. With the
+throttle closed the engine makes no torque, so the shaft is dragged round by
+the airflow until the propeller's own torque vanishes, at `J = CP0/kP`. The
+propeller then sits at a windmilling speed producing *negative* thrust --- the
+drag of a windmilling propeller, which is exactly why a motor glider pilot
+stops the engine before soaring.
+
+Note there are then **two** engine-off equilibria: windmilling, and stopped at
+`n = 0`, where both the torque and the thrust vanish. Which one a run finds
+depends on the initial shaft speed. That is not an artefact --- a real stopped
+propeller stays stopped until something spins it up --- but it does mean the
+engine-off glide ratio depends on whether the propeller was left turning.
+
+# Propeller model
+
+Standard coefficients against advance ratio `J = V/(n*D)`, with `n` in
+revolutions per second:
+
+    T = CT * rho * n^2 * D^4          CT = CT0 - kT*J
+    Q = CP * rho * n^2 * D^5 / (2*pi) CP = CP0 - kP*J
+
+Both coefficients fall linearly with `J`, which is the usual behaviour of a
+fixed-pitch propeller over its working range. Efficiency `eta = J*CT/CP` then
+peaks near `J = 0.75`, as a wooden cruise propeller does.
+
+# Engine model
+
+A piston engine holds roughly constant torque over its range, so power rises
+with speed. `torque_rise` gives the mild low-speed torque bulge real engines
+show, and a smooth cut-off past `x_redline` stops the shaft running away --- at
+full throttle and high airspeed the propeller unloads, and without the cut-off
+there is nothing to limit the speed.
+
+# Numerical conditioning
+
+`n` appears in a denominator, so the advance ratio uses `sqrt(n^2 + n_eps^2)`.
+That alone is not enough: a stopped propeller in fast forward flight drives `J`
+to very large values and the linear coefficients with it, so `J` is saturated
+smoothly with `tanh`. Both coefficients are then bounded for any combination of
+airspeed and shaft speed, including reversed flow.
+"""
+component Propeller
+  "Mount; thrust acts along the +x axis of this frame"
+  frame_a = Frame3D() {^frame_a}
+  "Density and wind"
+  air = AirState() {^air}
+  "Throttle, 0 is engine off and 1 is full power"
+  throttle = RealInput() {^throttle}
+
+  """
+  Propeller rotation seen from behind looking forward. Sets which way the
+  torque reaction rolls the airframe: a clockwise propeller rolls it left.
+  """
+  structural parameter clockwise::Boolean = true
+
+  "Propeller diameter"
+  parameter D::Length = 1.5
+  "Rotating inertia of crankshaft and propeller together"
+  parameter I_shaft::Inertia = 0.35
+  "Rated shaft power"
+  parameter P_rated::Real = 59700
+  "Shaft speed at rated power, revolutions per second"
+  parameter n_rated::Real = 45.0
+  "Thrust coefficient at zero advance ratio"
+  parameter CT0::Real = 0.135
+  "Fall of the thrust coefficient with advance ratio"
+  parameter kT::Real = 0.115
+  "Power coefficient at zero advance ratio"
+  parameter CP0::Real = 0.088
+  "Fall of the power coefficient with advance ratio"
+  parameter kP::Real = 0.048
+  "Fractional torque bulge at low shaft speed"
+  parameter torque_rise::Real = 0.15
+  "Shaft speed at which engine torque is cut, as a multiple of rated"
+  parameter x_redline::Real = 1.15
+  "Sharpness of the redline cut"
+  parameter M_redline::Real = 15.0
+  """
+  Advance ratio at which the coefficients saturate. Only there to bound the
+  coefficients when a nearly stopped propeller meets fast forward flight; the
+  `n_safe^2` factor already makes the *force* negligible there, so this can sit
+  well clear of the working range. It must: windmilling settles at
+  `J = CP0/kP`, about 1.8, and a tight saturation would distort the windmilling
+  speed and hence the engine-off drag.
+  """
+  parameter J_max::Real = 6.0
+  "Shaft speed regularisation, revolutions per second"
+  parameter n_eps::Real = 0.5
+  "Initial shaft speed"
+  parameter n_start::Real = 0.0
+
+  "Rated shaft torque"
+  final parameter Q_rated::Dyad.Torque = P_rated / (2 * 3.141592653589793 * n_rated)
+
+  "Shaft speed, revolutions per second"
+  variable n::Real
+  "Regularised shaft speed"
+  variable n_safe::Real
+  "Axial airspeed through the disc"
+  variable V_ax::Velocity
+  "Raw advance ratio"
+  variable J_raw::Real
+  "Saturated advance ratio used in the coefficients"
+  variable J_adv::Real
+  "Thrust coefficient"
+  variable CT::Real
+  "Power coefficient"
+  variable CP::Real
+  "Thrust, positive forward"
+  variable T::Dyad.Force
+  "Torque absorbed by the propeller"
+  variable Q_prop::Dyad.Torque
+  "Torque delivered by the engine"
+  variable Q_eng::Dyad.Torque
+  "Shaft power delivered"
+  variable P_shaft::Real
+  "Propulsive efficiency"
+  variable eta::Real
+  "Velocity of the mount relative to the air mass, world frame"
+  variable v_rel_0::Velocity[3]
+  "Velocity of the mount relative to the air mass, mount frame"
+  variable v_rel_s::Velocity[3]
+relations
+  initial n = n_start
+
+  v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
+  v_rel_s = MultibodyComponents.resolve2(frame_a.R, v_rel_0)
+  V_ax = v_rel_s[1]
+
+  n_safe = sqrt(n^2 + n_eps^2)
+  # Signed, smooth regularisation of V/(n*D): tends to the true advance ratio
+  # for either sign of n and passes through zero rather than blowing up.
+  J_raw = V_ax * n / ((n^2 + n_eps^2) * D)
+  J_adv = J_max * tanh(J_raw / J_max)
+
+  CT = CT0 - kT * J_adv
+  CP = CP0 - kP * J_adv
+  # `n*n_safe` is a smooth stand-in for `n*abs(n)`, so thrust and torque both
+  # change sign with the direction of rotation and vanish at rest. Using
+  # `n_safe^2` instead leaves the propeller torque positive even when the shaft
+  # is turning backwards, and a stopped propeller with the throttle closed is
+  # then driven to ever more negative speed without limit.
+  T = CT * air.rho * n * n_safe * D^4
+  Q_prop = CP * air.rho * n * n_safe * D^5 / (2 * 3.141592653589793)
+
+  Q_eng = throttle * Q_rated * (1 + torque_rise * (1 - (n_safe / n_rated)^2)) *
+          0.5 * (1 - tanh(M_redline * (n_safe / n_rated - x_redline)))
+  P_shaft = Q_eng * 2 * 3.141592653589793 * n
+  eta = J_adv * CT / max(CP, 1e-6)
+
+  # Shaft dynamics. der(n) is in rev/s^2, hence the 2*pi.
+  I_shaft * 2 * 3.141592653589793 * der(n) = Q_eng - Q_prop
+
+  # Thrust along +x, and the torque reaction of driving the propeller. A
+  # clockwise propeller takes torque +Q about +x, so the airframe feels -Q.
+  frame_a.f = [-T, 0, 0]
+  if clockwise
+    frame_a.tau = [Q_prop, 0, 0]
+  else
+    frame_a.tau = [-Q_prop, 0, 0]
+  end
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/Propeller.svg"},
+    "doc": {"behavior": false}
+  },
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50}}}
+    },
+    "throttle": {
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": 950, "x2": 550, "y2": 1050}}}
+    }
+  }
+}
+end
+
+"""
+Propeller on a carrier driven at a constant airspeed, throttle wide open.
+
+The shaft is released from rest and allowed to find its own equilibrium
+against the propeller torque, which is the check that the engine and the
+propeller are matched: the shaft should settle near its rated speed at cruise
+and well below it when static.
+"""
+test component TestPropellerStatic
+  world = MultibodyComponents.World(render = false) {^world}
+  atm = Atmosphere(rho0 = 1.225) {^atm}
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false) {^mover}
+  prop = Propeller(D = 1.5, P_rated = 59700, n_rated = 45.0) {^prop}
+  thr = BlockComponents.Sources.Constant(k = 1.0) {^thr}
+  "Airspeed held through the run"
+  parameter V_test::Velocity = 0.0
+relations
+  mover.v_x = V_test
+  mover.v_y = 0
+  mover.v_z = 0
+  connect(atm.air, prop.air) {^id1}
+  connect(thr.y, prop.throttle) {^id2}
+  connect(mover.frame_b, prop.frame_a) {^id3}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 40, "y1": 800, "x2": 140, "y2": 900}}}},
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 540, "y1": 100, "x2": 640, "y2": 200}}}},
+    "mover": {"Dyad": {"placement": {"diagram": {"x1": 240, "y1": 400, "x2": 340, "y2": 500}}}},
+    "prop": {"Dyad": {"placement": {"diagram": {"x1": 560, "y1": 400, "x2": 660, "y2": 500}}}},
+    "thr": {"Dyad": {"placement": {"diagram": {"x1": 540, "y1": 700, "x2": 640, "y2": 800}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id2": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id3": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
+end

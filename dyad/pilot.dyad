@@ -1,0 +1,195 @@
+"""
+A pilot holding an attitude: pitch to a commanded angle, wings level.
+
+# Why this is needed rather than a fixed stick
+
+An aeroplane is not flown by holding the controls still. Three things in this
+model make that concrete:
+
+* The spiral mode is divergent --- mildly, doubling in about thirteen seconds,
+  which is normal and which a pilot corrects without noticing.
+* The propeller torque reaction rolls the airframe continuously, and nothing
+  else opposes it, so a fixed stick guarantees a departure into a spiral.
+* The phugoid is near neutrally damped, so a fixed elevator leaves the speed
+  and the climb angle swinging for the whole flight.
+
+Holding an attitude fixes all three at once, and it is what a pilot actually
+does: a take-off is flown by raising the tail, rotating at a speed and then
+holding a climb attitude, not by holding a stick position.
+
+# The loops
+
+Both are the same shape --- proportional on the attitude error, rate damping,
+and an integral term:
+
+    elevator = k_theta*((theta - theta_cmd) + xi_theta/T_i) + kd_theta*der(theta)
+    aileron  = -k_phi*((phi - phi_cmd) + xi_phi/T_i)        - kd_phi*der(phi)
+
+with the signs following the aircraft's own control conventions --- positive
+elevator is trailing edge down and pitches the nose down, so the elevator gain
+is positive on the error; positive aileron rolls right, so the aileron gain is
+negative on it.
+
+The proportional and rate gains are not fitted. With the pitch axis
+approximated as `der(q) = M_q*q + M_delta*elevator`, the closed loop is a
+second order system with `wn^2 = -M_delta*k_theta` and
+`2*zeta*wn = -(M_q + M_delta*kd_theta)`, so measuring the two derivatives from
+the model fixes the gains for a chosen bandwidth. The defaults here are about
+1.3 rad/s and 0.9 critical on the motor glider. The roll axis is so heavily
+damped by `L_p` that it is effectively first order, and `k_phi` sets a bank
+correction time constant of roughly `-L_p/(L_delta*k_phi)`.
+
+The integral terms are there because without them the commanded attitude is
+not the attitude that results. Holding a climb needs a standing elevator
+deflection, and a proportional loop can only produce it from a standing error:
+on this aircraft that is three degrees of pitch droop, and on the roll axis
+two thirds of a degree of bank --- which, being a bank, turns the aeroplane,
+at `g*tan(phi)/V`. Both are real effects of a *fixed stick position*, but a
+pilot is not a fixed stick: a pilot looks at the attitude and trims the error
+away. `T_i` is the trimming time constant, and at four seconds it is far
+slower than either loop, so it changes nothing about the response and only
+removes the offset.
+
+Both outputs are smoothly saturated at `delta_max`. The saturation is a
+`tanh`, which costs a fraction of a percent of gain at small deflections and
+cannot introduce a discontinuity for the solver to trip over. Each integrator
+is wound at a rate scaled by `1 - (output/delta_max)^2`, which is exactly the
+local gain of that `tanh`: the integrator slows as the control runs out of
+authority and stops dead at full deflection. That is anti-windup with no extra
+constant to choose, and it matters here --- the commanded ground attitude is
+one the aircraft cannot reach until the elevator has some airspeed to work
+with.
+
+# Rotation is on speed, not on time
+
+`theta_cmd` steps from `theta_ground` to `theta_climb` as the airspeed passes
+`V_rotate`, blended over `V_blend`. Keying it to speed rather than to a clock
+is what makes the take-off self-sequencing: change the mass, the thrust or the
+rolling friction and the aircraft still rotates at the right speed instead of
+at whatever point in the roll a fixed time happened to correspond to.
+
+# What this is not
+
+There is no speed hold and no throttle loop, so the aircraft climbs at
+whatever speed the commanded attitude and the open throttle produce. There is
+also no rudder, which is honest only because this airframe has no modelled
+slipstream swirl and no P-factor --- the two things that make a real pilot
+hold right rudder on take-off. Add either and this model needs a yaw loop.
+"""
+component Pilot
+  "Mount on the aircraft datum; attitude and velocity are read from here"
+  frame_a = Frame3D() {^frame_a}
+  "Density and wind, so the loops work on airspeed rather than ground speed"
+  air = AirState() {^air}
+  "Elevator command, positive trailing edge down"
+  elevator = RealOutput() {^elevator}
+  "Aileron command, positive rolls right"
+  aileron = RealOutput() {^aileron}
+
+  "Pitch attitude held below the rotation speed; level is the tail-up attitude of a taildragger"
+  parameter theta_ground::Angle = 0.0
+  "Pitch attitude held above the rotation speed"
+  parameter theta_climb::Angle = 0.12
+  "Airspeed at which the aircraft is rotated"
+  parameter V_rotate::Velocity = 22.0
+  "Width of the blend between the two commanded attitudes"
+  parameter V_blend::Velocity = 1.5
+  "Bank angle held throughout, positive right wing down"
+  parameter phi_cmd::Angle = 0.0
+  "Elevator per radian of pitch error"
+  parameter k_theta::Real = 0.25
+  "Elevator per radian per second of pitch rate"
+  parameter kd_theta::Real = 0.06
+  "Aileron per radian of bank error"
+  parameter k_phi::Real = 0.35
+  "Aileron per radian per second of roll rate"
+  parameter kd_phi::Real = 0.05
+  "Time over which a standing attitude error is trimmed away, both axes"
+  parameter T_i::Real = 4.0
+  "Control deflection limit, both axes"
+  parameter delta_max::Angle = 0.35
+  "Airspeed regularisation, so the speed is differentiable at rest"
+  parameter v_eps::Velocity = 0.5
+
+  "Velocity of the datum relative to the air mass, world frame"
+  variable v_rel_0::Velocity[3]
+  "Airspeed"
+  variable V::Velocity
+  "Pitch attitude, positive nose up"
+  variable theta::Angle
+  "Bank angle, positive right wing down"
+  variable phi::Angle
+  "Commanded pitch attitude"
+  variable theta_cmd::Angle
+  "Pitch rate"
+  variable theta_dot::Real
+  "Roll rate"
+  variable phi_dot::Real
+  "Pitch attitude error"
+  variable e_theta::Angle
+  "Bank angle error"
+  variable e_phi::Angle
+  "Accumulated pitch error, trimmed out by the integral term"
+  variable xi_theta::Real = initial 0.0
+  "Accumulated bank error, trimmed out by the integral term"
+  variable xi_phi::Real = initial 0.0
+relations
+  # A pilot is a sensor: it reads the frame and applies nothing to it
+  frame_a.f = [0, 0, 0]
+  frame_a.tau = [0, 0, 0]
+
+  v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
+  V = sqrt(v_rel_0[1]^2 + v_rel_0[2]^2 + v_rel_0[3]^2 + v_eps^2)
+
+  # Column 2 of R is the world vertical resolved in body axes, which for the
+  # yaw-pitch-roll sequence of this frame convention is
+  # [sin(theta), cos(theta)*cos(phi), -cos(theta)*sin(phi)]. Reading the
+  # attitude from it is exact for any heading and singular only with the nose
+  # straight up, which no take-off reaches.
+  theta = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2]^2 + frame_a.R[3, 2]^2))
+  phi = atan(-frame_a.R[3, 2], frame_a.R[2, 2])
+  theta_dot = der(theta)
+  phi_dot = der(phi)
+
+  theta_cmd = theta_ground +
+              (theta_climb - theta_ground) * 0.5 * (1 + tanh((V - V_rotate) / V_blend))
+
+  e_theta = theta - theta_cmd
+  e_phi = phi - phi_cmd
+  elevator = delta_max * tanh((k_theta * (e_theta + xi_theta / T_i) + kd_theta * theta_dot) / delta_max)
+  aileron = delta_max * tanh((-k_phi * (e_phi + xi_phi / T_i) - kd_phi * phi_dot) / delta_max)
+
+  # Wound at the local gain of the saturation, so the integrator gives up
+  # exactly as fast as the control runs out of authority
+  der(xi_theta) = e_theta * (1 - (elevator / delta_max)^2)
+  der(xi_phi) = e_phi * (1 - (aileron / delta_max)^2)
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/Pilot.svg"},
+    "labels": [
+      {"label": "$(instance)", "x": 500, "y": 1100, "rot": 0},
+      {
+        "label": "theta = $(theta_climb)",
+        "x": 500,
+        "y": 1230,
+        "rot": 0,
+        "attrs": {"font-size": "90", "fill": "#6b7a88"}
+      }
+    ]
+  },
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 300, "x2": 50, "y2": 400}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 600, "x2": 50, "y2": 700}}}
+    },
+    "elevator": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}
+    },
+    "aileron": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}
+    }
+  }
+}
+end

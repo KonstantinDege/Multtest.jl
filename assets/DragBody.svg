@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <g fill="#2f9fd0">
+    <rect x="30" y="302" width="150" height="20" rx="10"/>
+    <rect x="30" y="490" width="112" height="20" rx="10"/>
+    <rect x="30" y="678" width="150" height="20" rx="10"/>
+  </g>
+  <ellipse cx="455" cy="490" rx="278" ry="205" fill="#d8dee4" stroke="#44515d" stroke-width="18"/>
+  <g fill="none" stroke="#2f9fd0" stroke-width="16" opacity="0.85" stroke-linecap="round">
+    <path d="M722 352 C 810 410, 800 472, 892 434"/>
+    <path d="M734 490 C 840 530, 818 590, 916 550"/>
+    <path d="M722 628 C 810 660, 820 724, 904 688"/>
+  </g>
+  <rect x="440" y="806" width="400" height="30" rx="15" fill="#e8663c"/>
+  <polygon points="926,821 824,772 824,870" fill="#e8663c"/>
+  <text x="520" y="948" font-family="sans-serif" font-size="150" font-weight="bold" fill="#e8663c">D</text>
+</svg>

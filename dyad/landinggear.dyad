@@ -1,0 +1,162 @@
+"""
+Compliant point contact with the ground plane.
+
+One instance per wheel or skid. The ground is the plane `y = ground_height`,
+and the contact sits `radius` below `frame_a`, so a wheel is mounted at its
+axle and a skid with `radius = 0`.
+
+# Why a compliant contact rather than a constraint
+
+The aircraft has to be able to leave the ground and come back, so the contact
+cannot be a joint. A spring-damper that switches off above the ground does the
+job, and the whole difficulty is making it switch off *smoothly* --- a contact
+that turns on abruptly is the classic way to make a landing gear chatter, and a
+damper that keeps acting as the wheel lifts will glue the aircraft down.
+
+Both are handled here:
+
+* The penetration uses a `tanh` gate, `d = -h*(1 - tanh(h/h_eps))/2`, which
+  decays exponentially rather than algebraically above the ground. A few
+  millimetres clear and the residual force is parts per million of nominal,
+  so there is no phantom lift in cruise --- which a plain smooth `max(0,-h)`
+  would leave behind.
+* The damping term is multiplied by the penetration, so it vanishes with the
+  contact instead of pulling the wheel back down as it lifts.
+* The total normal force is then smoothly clamped at zero, because ground
+  pushes and never pulls.
+
+# Friction
+
+Tangential force is `-mu * Fn * tanh(v/v_slip)` per axis, which is Coulomb
+friction regularised so that it is continuous through zero sliding speed and
+cannot chatter. Separate coefficients along and across the body let one
+component serve both roles: a wheel gets a small `mu_x` (rolling resistance)
+and a large `mu_z` (it resists sideways), while a skid gets both large.
+
+The wheel's own rotation is not modelled. For take-off and landing rolls the
+distinction does not arise; it would for wheel spin-up on touchdown or for
+braking, and that is the upgrade path.
+"""
+component GroundContact
+  "Mount; for a wheel this is the axle, for a skid the skid itself"
+  frame_a = Frame3D() {^frame_a}
+  """
+  The wheel, drawn about its axle with the axis across the aircraft. A skid
+  has `radius = 0` and would be invisible, so the drawn radius has a floor;
+  what it marks is the contact point, which is the thing worth seeing.
+
+  This is a bare `CylinderShape` driven from `frame_a`, not a
+  `CylinderVisualizer` connected to it. A visualizer is a frame-connected
+  component that declares `frame_a.f = 0`, and `frame_a` here is the
+  component's *own* connector --- connecting anything to it makes the
+  connection set force `frame_a.f` to zero, which is in direct conflict with
+  this component's whole purpose of generating a contact force there. Driving
+  the shape primitive directly is what `CylinderVisualizer` does internally
+  anyway, and it adds no equations at all.
+
+  The dimensions are passed as *expressions* rather than as bare parameter
+  symbols because `Shape` declares `length`, `width` and `r_shape` as
+  time-dependent variables, and binding one to a bare parameter puts that
+  parameter and a variable in the same alias set.
+  """
+  wheel_vis = MultibodyComponents.CylinderShape(render = render, color = [0.15, 0.15, 0.17, 1.0], r = frame_a.r_0, R = transpose(frame_a.R), r_shape = [0.0, 0.0, -w_vis / 2], length_direction = [0.0, 0.0, 1.0], length = w_vis * 1.0, width = 2 * max(radius, 0.05), height = 2 * max(radius, 0.05))
+
+  "Height of the ground plane"
+  parameter ground_height::Length = 0.0
+  "Wheel radius; zero for a skid"
+  parameter radius::Length = 0.2
+  "Draw the wheel"
+  parameter render::Boolean = true
+  "Width of the drawn wheel; purely cosmetic"
+  parameter w_vis::Length = 0.09
+  "Normal stiffness"
+  parameter k_n::Real = 1.0e5
+  """
+  Normal damping, acting through the penetration. Because the damping force is
+  `d_n * pen * pen_dot`, the effective damping coefficient at rest is
+  `d_n * pen_static`, so compare `d_n * m*g/k_n` against the critical
+  `2*sqrt(k_n*m)`. At 1e5 a 400 kg wheel sits near a third of critical, which
+  absorbs a touchdown in about a second without being dead.
+  """
+  parameter d_n::Real = 1.0e5
+  "Friction coefficient along the body x axis; small for a rolling wheel"
+  parameter mu_x::Real = 0.03
+  "Friction coefficient along the body z axis; large for a wheel resisting sideways"
+  parameter mu_z::Real = 0.6
+  "Sliding speed over which friction saturates"
+  parameter v_slip::Velocity = 0.3
+  "Width of the contact gate; a few millimetres"
+  parameter h_eps::Length = 0.002
+  """
+  Smoothing on the zero clamp of the normal force. The clamp leaves `f_eps/2`
+  of residual force even with no contact at all, so this has to stay small
+  enough that several contacts together are still negligible against the
+  aircraft weight.
+  """
+  parameter f_eps::Dyad.Force = 0.05
+
+  "Height of the contact point above the ground, negative when in contact"
+  variable h::Length
+  "Penetration depth, zero when clear of the ground"
+  variable pen::Length
+  "Closing speed of the penetration"
+  variable pen_dot::Velocity
+  "Normal force before the zero clamp"
+  variable Fn_raw::Dyad.Force
+  "Normal force applied to the ground, never negative"
+  variable Fn::Dyad.Force
+  "Velocity of the contact point, world frame"
+  variable v_c::Velocity[3]
+  "Force applied at the contact, world frame"
+  variable F_w::Dyad.Force[3]
+relations
+  h = frame_a.r_0[2] - radius - ground_height
+  # tanh gate: exponentially small above the ground, exactly -h below it
+  pen = -h * 0.5 * (1 - tanh(h / h_eps))
+  pen_dot = der(pen)
+  v_c = der(frame_a.r_0)
+
+  # Damping scaled by the penetration so it releases with the contact
+  Fn_raw = pen * (k_n + d_n * pen_dot)
+  Fn = 0.5 * (Fn_raw + sqrt(Fn_raw^2 + f_eps^2))
+
+  F_w = [-mu_x * Fn * tanh(v_c[1] / v_slip),
+         Fn,
+         -mu_z * Fn * tanh(v_c[3] / v_slip)]
+  frame_a.f = -MultibodyComponents.resolve2(frame_a.R, F_w)
+  frame_a.tau = [0, 0, 0]
+metadata {
+  "Dyad": {"icons": {"default": "dyad://Multtest/GroundContact.svg"}},
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50}}}
+    }
+  }
+}
+end
+
+"""
+A single wheel carrying a mass, dropped onto the ground.
+
+The mass must settle at the static deflection `m*g/k_n` and stop there; it is
+the check that the contact both supports the weight and releases cleanly rather
+than bouncing forever or sticking.
+"""
+test component TestGroundContactDrop
+  world = MultibodyComponents.World() {^world}
+  body = MultibodyComponents.Body(m = 400.0,
+                                  orientation_state = MultibodyComponents.OrientationState.Quaternion(),
+                                  statePriority = 1000, linearStatePriority = 1000,
+                                  r_0(initial = [0.0, 0.3, 0.0]), v_0(initial = [0.0, 0.0, 0.0])) {^body}
+  contact = GroundContact(radius = 0.2, k_n = 1.0e5, d_n = 2.0e4) {^contact}
+relations
+  connect(body.frame_a, contact.frame_a) {^id1}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 60, "y1": 760, "x2": 160, "y2": 860}}}},
+    "body": {"Dyad": {"placement": {"diagram": {"x1": 450, "y1": 200, "x2": 550, "y2": 300}}}},
+    "contact": {"Dyad": {"placement": {"diagram": {"x1": 450, "y1": 520, "x2": 550, "y2": 620}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
+end
