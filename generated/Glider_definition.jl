@@ -5,7 +5,7 @@
 
 
 @doc Markdown.doc"""
-   Glider(; name, has_htail, has_vtail, has_downwash, k_downwash, render, m_fuselage, I_fus_roll, I_fus_yaw, I_fus_pitch, r_start, V_start, gamma_start, theta_start, beta_start, phi_start, b_wing, S_wing, x_ac_wing, y_ac_wing, dihedral_wing, incidence_wing, m_wing, CL_delta_ail, CD_delta_ail, b_htail, S_htail, x_ac_htail, y_ac_htail, incidence_htail, m_htail, CL_delta_elev, b_vtail, S_vtail, x_ac_vtail, y_ac_vtail, m_vtail, CL_alpha_vtail, alpha_stall_vtail, CL_delta_rud, x_cp_fuselage, l_fuselage, radius_fuselage, CdA_fus_x, CdA_fus_y, CdA_fus_z)
+   Glider(; name, has_htail, has_vtail, has_downwash, has_engine, has_gear, k_downwash, render, m_fuselage, I_fus_roll, I_fus_yaw, I_fus_pitch, r_start, V_start, gamma_start, theta_start, beta_start, phi_start, b_wing, S_wing, x_ac_wing, y_ac_wing, dihedral_wing, incidence_wing, m_wing, CL_delta_ail, CD_delta_ail, CL0_wing, CL_alpha_wing, CD0_wing, CM0_wing, e_oswald_wing, alpha_stall_wing, b_htail, S_htail, x_ac_htail, y_ac_htail, incidence_htail, m_htail, CL_delta_elev, b_vtail, S_vtail, x_ac_vtail, y_ac_vtail, m_vtail, CL_alpha_vtail, alpha_stall_vtail, CL_delta_rud, x_cp_fuselage, l_fuselage, radius_fuselage, x_prop, y_prop, D_prop, P_engine, n_rated_engine, I_shaft_engine, x_mainwheel, y_mainwheel, r_mainwheel, track_mainwheel, x_tailwheel, y_tailwheel, r_tailwheel, y_tipskid, k_mainwheel, d_mainwheel, k_minorgear, d_minorgear, ground_height, CdA_fus_x, CdA_fus_y, CdA_fus_z)
 
 Standard class glider, 15 m span.
 
@@ -42,6 +42,8 @@ datum is done by `Body` from `r_cm`.
 | `has_htail`         | Fit a horizontal tail; false leaves the aircraft pitch unstable on purpose                         | --  |   true |
 | `has_vtail`         | Fit a fin; false leaves the aircraft directionally unstable on purpose                         | --  |   true |
 | `has_downwash`         | Put the tailplane in the wing's downwash; false over-states the tail's effectiveness                         | --  |   true |
+| `has_engine`         | Fit a nose-mounted engine and propeller, turning the glider into a motor glider                         | --  |   false |
+| `has_gear`         | Fit the landing gear: a pair of main wheels on a track, a tailwheel, and a skid under each wing tip. […]                         | --  |   false |
 | `k_downwash`         | Fraction of the far-field downwash the tailplane sees                         | --  |   1.0 |
 | `render`         | Draw the aircraft                         | --  |   true |
 | `m_fuselage`         | Mass of the fuselage, including the pilot and everything not in a surface                         | kg  |   230.0 |
@@ -63,6 +65,12 @@ datum is done by `Body` from `r_cm`.
 | `m_wing`         | Wing mass                         | kg  |   100.0 |
 | `CL_delta_ail`         | Lift coefficient per radian of aileron, as seen by the whole semi-span panel. […]                         | --  |   1.611 |
 | `CD_delta_ail`         | Wing drag coefficient per radian squared of aileron deflection                         | --  |   0.05 |
+| `CL0_wing`         | Wing lift coefficient at zero incidence                         | --  |   0.25 |
+| `CL_alpha_wing`         | Wing lift curve slope, per radian, for the wing's own aspect ratio                         | --  |   5.7 |
+| `CD0_wing`         | Wing profile drag coefficient                         | --  |   0.008 |
+| `CM0_wing`         | Wing pitching moment coefficient about the aerodynamic centre at zero lift                         | --  |   -0.09 |
+| `e_oswald_wing`         | Wing Oswald span efficiency                         | --  |   0.95 |
+| `alpha_stall_wing`         | Incidence at the centre of the wing's stall blend                         | rad  |   0.244 |
 | `b_htail`         | Tailplane span                         | m  |   2.2 |
 | `S_htail`         | Tailplane area                         | m2  |   1.0 |
 | `x_ac_htail`         | Tailplane aerodynamic centre ahead of the centre of gravity; negative is aft                         | m  |   -4.0 |
@@ -81,6 +89,25 @@ datum is done by `Body` from `r_cm`.
 | `x_cp_fuselage`         | Station of the fuselage drag point, ahead of the centre of gravity. Slender body theory puts the body's normal force about a quarter of the body length behind the nose, which for this fuselage is just ahead of the centre of gravity; that is what produces the fuselage's destabilising contribution to pitch and yaw, so the station matters more than the drag areas do.                         | m  |   0.225 |
 | `l_fuselage`         | Fuselage length, nose to tail. Only drawn, not used aerodynamically. The drawn body is placed so its nose sits a quarter of the body length ahead of `x_cp_fuselage` --- the same slender-body assumption that station rests on, so the picture and the aerodynamic model cannot drift apart. […]                         | m  |   6.3 |
 | `radius_fuselage`         | Fuselage radius, for drawing                         | m  |   0.32 |
+| `x_prop`         | Propeller disc station, ahead of the centre of gravity                         | m  |   2.0 |
+| `y_prop`         | Thrust line above the centre of gravity. Not a detail: thrust acting above the centre of gravity pitches the nose down as power comes on, which is the trim change every pilot of a high-thrustline motor glider feels.                         | m  |   0.20 |
+| `D_prop`         | Propeller diameter                         | m  |   1.5 |
+| `P_engine`         | Rated shaft power                         | --  |   59700 |
+| `n_rated_engine`         | Shaft speed at rated power, revolutions per second                         | --  |   45.0 |
+| `I_shaft_engine`         | Rotating inertia of crankshaft and propeller                         | kg.m2  |   0.35 |
+| `x_mainwheel`         | Main wheel axle station, ahead of the centre of gravity. Keep it a little ahead: a taildragger pivots about its main wheels, so wheels behind the centre of gravity would let it sit on its nose.                         | m  |   0.12 |
+| `y_mainwheel`         | Main wheel axle below the centre of gravity                         | m  |   -0.62 |
+| `r_mainwheel`         | Main wheel radius                         | m  |   0.20 |
+| `track_mainwheel`         | Distance between the two main wheels. Sets the tip-over angle together with the centre of gravity height, and sets how much yaw restraint the pair gives against a swing on the ground.                         | m  |   1.80 |
+| `x_tailwheel`         | Tailwheel station, behind the centre of gravity                         | m  |   -4.30 |
+| `y_tailwheel`         | Tailwheel axle below the centre of gravity                         | m  |   -0.24 |
+| `r_tailwheel`         | Tailwheel radius                         | m  |   0.06 |
+| `y_tipskid`         | Wing tip skid below the centre of gravity                         | m  |   -0.05 |
+| `k_mainwheel`         | Normal stiffness of each main wheel; the pair together carries the weight                         | --  |   1.0e5 |
+| `d_mainwheel`         | Normal damping of each main wheel                         | --  |   7.5e4 |
+| `k_minorgear`         | Normal stiffness of the tailwheel and tip skids                         | --  |   5.0e4 |
+| `d_minorgear`         | Normal damping of the tailwheel and tip skids                         | --  |   5.0e4 |
+| `ground_height`         | Height of the ground plane                         | m  |   0.0 |
 | `CdA_fus_x`         | Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider                         | m2  |   0.05 |
 | `CdA_fus_y`         | Fuselage normal drag area Cd*S, from the plan area and a slender-body cross-flow Cd                         | m2  |   2.1 |
 | `CdA_fus_z`         | Fuselage side drag area Cd*S, from the side area and a slender-body cross-flow Cd                         | m2  |   2.4 |
@@ -98,8 +125,11 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
  * `elevator` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `rudder` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `aileron` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `throttle` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
+ * `frame_datum` - Frame3D is the fundamental 3D connector used for 6DOF motion. Most components have one or several `Frame`
+connectors that can be connected together ([`Frame3D`](@ref))
 """
-@component function Glider(; name = nothing, has_htail=true, has_vtail=true, has_downwash=true, k_downwash=Float64(1.0), render=true, m_fuselage=Float64(230.0), I_fus_roll=Float64(35.0), I_fus_yaw=Float64(700.0), I_fus_pitch=Float64(700.0), r_start=[Float64(0.0), Float64(500.0), Float64(0.0)], V_start=Float64(25.0), gamma_start=-0.030476, theta_start=0.01956, beta_start=Float64(0.0), phi_start=Float64(0.0), b_wing=Float64(15.0), S_wing=10.5, x_ac_wing=0.145, y_ac_wing=Float64(0.0), dihedral_wing=0.052, incidence_wing=0.05236, m_wing=Float64(100.0), CL_delta_ail=1.611, CD_delta_ail=0.05, b_htail=2.2, S_htail=Float64(1.0), x_ac_htail=-4.0, y_ac_htail=0.25, incidence_htail=0.007662, m_htail=Float64(12.0), CL_delta_elev=2.2, b_vtail=1.2, S_vtail=0.8, x_ac_vtail=-3.8, y_ac_vtail=0.3, m_vtail=Float64(8.0), CL_alpha_vtail=3.8, alpha_stall_vtail=0.35, CL_delta_rud=1.5, x_cp_fuselage=0.225, l_fuselage=6.3, radius_fuselage=0.32, CdA_fus_x=0.05, CdA_fus_y=2.1, CdA_fus_z=2.4, kwargs...)
+@component function Glider(; name = nothing, has_htail=true, has_vtail=true, has_downwash=true, has_engine=false, has_gear=false, k_downwash=Float64(1.0), render=true, m_fuselage=Float64(230.0), I_fus_roll=Float64(35.0), I_fus_yaw=Float64(700.0), I_fus_pitch=Float64(700.0), r_start=[Float64(0.0), Float64(500.0), Float64(0.0)], V_start=Float64(25.0), gamma_start=-0.030476, theta_start=0.01956, beta_start=Float64(0.0), phi_start=Float64(0.0), b_wing=Float64(15.0), S_wing=10.5, x_ac_wing=0.145, y_ac_wing=Float64(0.0), dihedral_wing=0.052, incidence_wing=0.05236, m_wing=Float64(100.0), CL_delta_ail=1.611, CD_delta_ail=0.05, CL0_wing=0.25, CL_alpha_wing=5.7, CD0_wing=0.008, CM0_wing=-0.09, e_oswald_wing=0.95, alpha_stall_wing=0.244, b_htail=2.2, S_htail=Float64(1.0), x_ac_htail=-4.0, y_ac_htail=0.25, incidence_htail=0.007662, m_htail=Float64(12.0), CL_delta_elev=2.2, b_vtail=1.2, S_vtail=0.8, x_ac_vtail=-3.8, y_ac_vtail=0.3, m_vtail=Float64(8.0), CL_alpha_vtail=3.8, alpha_stall_vtail=0.35, CL_delta_rud=1.5, x_cp_fuselage=0.225, l_fuselage=6.3, radius_fuselage=0.32, x_prop=Float64(2.0), y_prop=0.2, D_prop=1.5, P_engine=Float64(59700), n_rated_engine=Float64(45.0), I_shaft_engine=0.35, x_mainwheel=0.12, y_mainwheel=-0.62, r_mainwheel=0.2, track_mainwheel=1.8, x_tailwheel=-4.3, y_tailwheel=-0.24, r_tailwheel=0.06, y_tipskid=-0.05, k_mainwheel=Float64(100000.0), d_mainwheel=Float64(75000.0), k_minorgear=Float64(50000.0), d_minorgear=Float64(50000.0), ground_height=Float64(0.0), CdA_fus_x=0.05, CdA_fus_y=2.1, CdA_fus_z=2.4, kwargs...)
   isnothing(name) && throw(ArgumentError("""
     The `name` keyword must be provided. Please consider using the `@named` macro,
     like so:
@@ -236,6 +266,24 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__CD_delta_ail = CD_delta_ail
   append!(__params, @parameters (CD_delta_ail::Real), [description = "Wing drag coefficient per radian squared of aileron deflection"])
   __initial_conditions[CD_delta_ail] = __local__CD_delta_ail
+  __local__CL0_wing = CL0_wing
+  append!(__params, @parameters (CL0_wing::Real), [description = "Wing lift coefficient at zero incidence"])
+  __initial_conditions[CL0_wing] = __local__CL0_wing
+  __local__CL_alpha_wing = CL_alpha_wing
+  append!(__params, @parameters (CL_alpha_wing::Real), [description = "Wing lift curve slope, per radian, for the wing's own aspect ratio"])
+  __initial_conditions[CL_alpha_wing] = __local__CL_alpha_wing
+  __local__CD0_wing = CD0_wing
+  append!(__params, @parameters (CD0_wing::Real), [description = "Wing profile drag coefficient"])
+  __initial_conditions[CD0_wing] = __local__CD0_wing
+  __local__CM0_wing = CM0_wing
+  append!(__params, @parameters (CM0_wing::Real), [description = "Wing pitching moment coefficient about the aerodynamic centre at zero lift"])
+  __initial_conditions[CM0_wing] = __local__CM0_wing
+  __local__e_oswald_wing = e_oswald_wing
+  append!(__params, @parameters (e_oswald_wing::Real), [description = "Wing Oswald span efficiency"])
+  __initial_conditions[e_oswald_wing] = __local__e_oswald_wing
+  __local__alpha_stall_wing = alpha_stall_wing
+  append!(__params, @parameters (alpha_stall_wing::Real), [description = "Incidence at the centre of the wing's stall blend"])
+  __initial_conditions[alpha_stall_wing] = __local__alpha_stall_wing
   __local__b_htail = b_htail
   append!(__params, @parameters (b_htail::Real), [description = "Tailplane span"])
   __initial_conditions[b_htail] = __local__b_htail
@@ -321,6 +369,69 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __local__radius_fuselage = radius_fuselage
   append!(__params, @parameters (radius_fuselage::Real), [description = "Fuselage radius, for drawing"])
   __initial_conditions[radius_fuselage] = __local__radius_fuselage
+  __local__x_prop = x_prop
+  append!(__params, @parameters (x_prop::Real), [description = "Propeller disc station, ahead of the centre of gravity"])
+  __initial_conditions[x_prop] = __local__x_prop
+  __local__y_prop = y_prop
+  append!(__params, @parameters (y_prop::Real), [description = "Thrust line above the centre of gravity. Not a detail: thrust acting above
+  append!(__params, @parameters (y_prop::Real), [description = the centre of gravity pitches the nose down as power comes on, which is the
+  append!(__params, @parameters (y_prop::Real), [description = trim change every pilot of a high-thrustline motor glider feels."])
+  __initial_conditions[y_prop] = __local__y_prop
+  __local__D_prop = D_prop
+  append!(__params, @parameters (D_prop::Real), [description = "Propeller diameter"])
+  __initial_conditions[D_prop] = __local__D_prop
+  __local__P_engine = P_engine
+  append!(__params, @parameters (P_engine::Real), [description = "Rated shaft power"])
+  __initial_conditions[P_engine] = __local__P_engine
+  __local__n_rated_engine = n_rated_engine
+  append!(__params, @parameters (n_rated_engine::Real), [description = "Shaft speed at rated power, revolutions per second"])
+  __initial_conditions[n_rated_engine] = __local__n_rated_engine
+  __local__I_shaft_engine = I_shaft_engine
+  append!(__params, @parameters (I_shaft_engine::Real), [description = "Rotating inertia of crankshaft and propeller"])
+  __initial_conditions[I_shaft_engine] = __local__I_shaft_engine
+  __local__x_mainwheel = x_mainwheel
+  append!(__params, @parameters (x_mainwheel::Real), [description = "Main wheel axle station, ahead of the centre of gravity. Keep it a little
+  append!(__params, @parameters (x_mainwheel::Real), [description = ahead: a taildragger pivots about its main wheels, so wheels behind the
+  append!(__params, @parameters (x_mainwheel::Real), [description = centre of gravity would let it sit on its nose."])
+  __initial_conditions[x_mainwheel] = __local__x_mainwheel
+  __local__y_mainwheel = y_mainwheel
+  append!(__params, @parameters (y_mainwheel::Real), [description = "Main wheel axle below the centre of gravity"])
+  __initial_conditions[y_mainwheel] = __local__y_mainwheel
+  __local__r_mainwheel = r_mainwheel
+  append!(__params, @parameters (r_mainwheel::Real), [description = "Main wheel radius"])
+  __initial_conditions[r_mainwheel] = __local__r_mainwheel
+  __local__track_mainwheel = track_mainwheel
+  append!(__params, @parameters (track_mainwheel::Real), [description = "Distance between the two main wheels. Sets the tip-over angle together with
+  append!(__params, @parameters (track_mainwheel::Real), [description = the centre of gravity height, and sets how much yaw restraint the pair gives
+  append!(__params, @parameters (track_mainwheel::Real), [description = against a swing on the ground."])
+  __initial_conditions[track_mainwheel] = __local__track_mainwheel
+  __local__x_tailwheel = x_tailwheel
+  append!(__params, @parameters (x_tailwheel::Real), [description = "Tailwheel station, behind the centre of gravity"])
+  __initial_conditions[x_tailwheel] = __local__x_tailwheel
+  __local__y_tailwheel = y_tailwheel
+  append!(__params, @parameters (y_tailwheel::Real), [description = "Tailwheel axle below the centre of gravity"])
+  __initial_conditions[y_tailwheel] = __local__y_tailwheel
+  __local__r_tailwheel = r_tailwheel
+  append!(__params, @parameters (r_tailwheel::Real), [description = "Tailwheel radius"])
+  __initial_conditions[r_tailwheel] = __local__r_tailwheel
+  __local__y_tipskid = y_tipskid
+  append!(__params, @parameters (y_tipskid::Real), [description = "Wing tip skid below the centre of gravity"])
+  __initial_conditions[y_tipskid] = __local__y_tipskid
+  __local__k_mainwheel = k_mainwheel
+  append!(__params, @parameters (k_mainwheel::Real), [description = "Normal stiffness of each main wheel; the pair together carries the weight"])
+  __initial_conditions[k_mainwheel] = __local__k_mainwheel
+  __local__d_mainwheel = d_mainwheel
+  append!(__params, @parameters (d_mainwheel::Real), [description = "Normal damping of each main wheel"])
+  __initial_conditions[d_mainwheel] = __local__d_mainwheel
+  __local__k_minorgear = k_minorgear
+  append!(__params, @parameters (k_minorgear::Real), [description = "Normal stiffness of the tailwheel and tip skids"])
+  __initial_conditions[k_minorgear] = __local__k_minorgear
+  __local__d_minorgear = d_minorgear
+  append!(__params, @parameters (d_minorgear::Real), [description = "Normal damping of the tailwheel and tip skids"])
+  __initial_conditions[d_minorgear] = __local__d_minorgear
+  __local__ground_height = ground_height
+  append!(__params, @parameters (ground_height::Real), [description = "Height of the ground plane"])
+  __initial_conditions[ground_height] = __local__ground_height
   __local__CdA_fus_x = CdA_fus_x
   append!(__params, @parameters (CdA_fus_x::Real), [description = "Fuselage axial drag area Cd*S; the equivalent flat plate area of a clean glider"])
   __initial_conditions[CdA_fus_x] = __local__CdA_fus_x
@@ -346,6 +457,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   append!(__vars, @variables (elevator(t)::Real), [input = true])
   append!(__vars, @variables (rudder(t)::Real), [input = true])
   append!(__vars, @variables (aileron(t)::Real), [input = true])
+  append!(__vars, @variables (throttle(t)::Real), [input = true])
 
   ### Variables (declarations)
 
@@ -356,12 +468,13 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 
   ### Components
   push!(__systems, @named air = Multtest.AirState())
+  push!(__systems, @named frame_datum = __Dyad__Frame3D())
   # Subcomponent fuselage of type MultibodyComponents.Body
   fuselage_overrides = __pop_subcomponent_overrides!(__overrides, "fuselage")
   push!(__systems, @named fuselage = MultibodyComponents.Body(; m=m_fuselage, r_cm=r_cm_fuselage, I_11=I_fus_roll, I_22=I_fus_yaw, I_33=I_fus_pitch, orientation_state=MultibodyComponents.OrientationState.Quaternion(), statePriority=1000, linearStatePriority=1000, initialize_orientation=false, r_0__initial=r_start, v_0__initial=v_start, Q_hat__initial=q_start, fuselage_overrides...))
   # Subcomponent wing of type Multtest.Wing
   wing_overrides = __pop_subcomponent_overrides!(__overrides, "wing")
-  push!(__systems, @named wing = Multtest.Wing(; has_control=true, b=b_wing, S=S_wing, x_ac=x_ac_wing, y_ac=y_ac_wing, dihedral=dihedral_wing, incidence=incidence_wing, m=m_wing, CL0=0.25, CL_alpha=5.7, CD0=0.008, CM0=-0.09, e_oswald=0.95, alpha_stall=0.244, CL_delta=CL_delta_ail, CM_delta=-0.45, CD_delta=CD_delta_ail, wing_overrides...))
+  push!(__systems, @named wing = Multtest.Wing(; has_control=true, b=b_wing, S=S_wing, x_ac=x_ac_wing, y_ac=y_ac_wing, dihedral=dihedral_wing, incidence=incidence_wing, m=m_wing, CL0=CL0_wing, CL_alpha=CL_alpha_wing, CD0=CD0_wing, CM0=CM0_wing, e_oswald=e_oswald_wing, alpha_stall=alpha_stall_wing, CL_delta=CL_delta_ail, CM_delta=-0.45, CD_delta=CD_delta_ail, wing_overrides...))
   # Subcomponent ail_invert of type BlockComponents.Math.Gain
   ail_invert_overrides = __pop_subcomponent_overrides!(__overrides, "ail_invert")
   push!(__systems, @named ail_invert = BlockComponents.Math.Gain(; k=-1.0, ail_invert_overrides...))
@@ -389,6 +502,66 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   # Subcomponent fus_drag of type Multtest.DragBody
   fus_drag_overrides = __pop_subcomponent_overrides!(__overrides, "fus_drag")
   push!(__systems, @named fus_drag = Multtest.DragBody(; CdA_x=CdA_fus_x, CdA_y=CdA_fus_y, CdA_z=CdA_fus_z, fus_drag_overrides...))
+  # Subcomponent prop_mount of type MultibodyComponents.FixedTranslation
+  prop_mount_overrides = __pop_subcomponent_overrides!(__overrides, "prop_mount")
+  if has_engine
+    push!(__systems, @named prop_mount = MultibodyComponents.FixedTranslation(; r=[x_prop, y_prop, Float64(0.0)], render=false, prop_mount_overrides...))
+  end
+  # Subcomponent mainwheel_l_mount of type MultibodyComponents.FixedTranslation
+  mainwheel_l_mount_overrides = __pop_subcomponent_overrides!(__overrides, "mainwheel_l_mount")
+  if has_gear
+    push!(__systems, @named mainwheel_l_mount = MultibodyComponents.FixedTranslation(; r=[x_mainwheel, y_mainwheel, -track_mainwheel / 2], render=false, mainwheel_l_mount_overrides...))
+  end
+  # Subcomponent mainwheel_l of type Multtest.GroundContact
+  mainwheel_l_overrides = __pop_subcomponent_overrides!(__overrides, "mainwheel_l")
+  if has_gear
+    push!(__systems, @named mainwheel_l = Multtest.GroundContact(; render=render, radius=r_mainwheel, k_n=k_mainwheel, d_n=d_mainwheel, mu_x=0.03, mu_z=0.7, ground_height=ground_height, mainwheel_l_overrides...))
+  end
+  # Subcomponent mainwheel_r_mount of type MultibodyComponents.FixedTranslation
+  mainwheel_r_mount_overrides = __pop_subcomponent_overrides!(__overrides, "mainwheel_r_mount")
+  if has_gear
+    push!(__systems, @named mainwheel_r_mount = MultibodyComponents.FixedTranslation(; r=[x_mainwheel, y_mainwheel, track_mainwheel / 2], render=false, mainwheel_r_mount_overrides...))
+  end
+  # Subcomponent mainwheel_r of type Multtest.GroundContact
+  mainwheel_r_overrides = __pop_subcomponent_overrides!(__overrides, "mainwheel_r")
+  if has_gear
+    push!(__systems, @named mainwheel_r = Multtest.GroundContact(; render=render, radius=r_mainwheel, k_n=k_mainwheel, d_n=d_mainwheel, mu_x=0.03, mu_z=0.7, ground_height=ground_height, mainwheel_r_overrides...))
+  end
+  # Subcomponent tailwheel_mount of type MultibodyComponents.FixedTranslation
+  tailwheel_mount_overrides = __pop_subcomponent_overrides!(__overrides, "tailwheel_mount")
+  if has_gear
+    push!(__systems, @named tailwheel_mount = MultibodyComponents.FixedTranslation(; r=[x_tailwheel, y_tailwheel, Float64(0.0)], render=false, tailwheel_mount_overrides...))
+  end
+  # Subcomponent tailwheel of type Multtest.GroundContact
+  tailwheel_overrides = __pop_subcomponent_overrides!(__overrides, "tailwheel")
+  if has_gear
+    push!(__systems, @named tailwheel = Multtest.GroundContact(; render=render, w_vis=0.04, radius=r_tailwheel, k_n=k_minorgear, d_n=d_minorgear, mu_x=0.04, mu_z=0.5, ground_height=ground_height, tailwheel_overrides...))
+  end
+  # Subcomponent tipskid_l_mount of type MultibodyComponents.FixedTranslation
+  tipskid_l_mount_overrides = __pop_subcomponent_overrides!(__overrides, "tipskid_l_mount")
+  if has_gear
+    push!(__systems, @named tipskid_l_mount = MultibodyComponents.FixedTranslation(; r=[Float64(0.0), y_tipskid, -b_wing / 2], render=false, tipskid_l_mount_overrides...))
+  end
+  # Subcomponent tipskid_l of type Multtest.GroundContact
+  tipskid_l_overrides = __pop_subcomponent_overrides!(__overrides, "tipskid_l")
+  if has_gear
+    push!(__systems, @named tipskid_l = Multtest.GroundContact(; render=render, w_vis=0.04, radius=Float64(0.0), k_n=k_minorgear, d_n=d_minorgear, mu_x=0.3, mu_z=0.3, ground_height=ground_height, tipskid_l_overrides...))
+  end
+  # Subcomponent tipskid_r_mount of type MultibodyComponents.FixedTranslation
+  tipskid_r_mount_overrides = __pop_subcomponent_overrides!(__overrides, "tipskid_r_mount")
+  if has_gear
+    push!(__systems, @named tipskid_r_mount = MultibodyComponents.FixedTranslation(; r=[Float64(0.0), y_tipskid, b_wing / 2], render=false, tipskid_r_mount_overrides...))
+  end
+  # Subcomponent tipskid_r of type Multtest.GroundContact
+  tipskid_r_overrides = __pop_subcomponent_overrides!(__overrides, "tipskid_r")
+  if has_gear
+    push!(__systems, @named tipskid_r = Multtest.GroundContact(; render=render, w_vis=0.04, radius=Float64(0.0), k_n=k_minorgear, d_n=d_minorgear, mu_x=0.3, mu_z=0.3, ground_height=ground_height, tipskid_r_overrides...))
+  end
+  # Subcomponent propeller of type Multtest.Propeller
+  propeller_overrides = __pop_subcomponent_overrides!(__overrides, "propeller")
+  if has_engine
+    push!(__systems, @named propeller = Multtest.Propeller(; D=D_prop, P_rated=P_engine, n_rated=n_rated_engine, I_shaft=I_shaft_engine, propeller_overrides...))
+  end
   # Subcomponent downwash of type Multtest.Downwash
   downwash_overrides = __pop_subcomponent_overrides!(__overrides, "downwash")
   if (has_htail) && (has_downwash)
@@ -415,6 +588,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__eqs, connect(air, wing.air))
   push!(__eqs, connect(aileron, wing.delta_l, ail_invert.u))
   push!(__eqs, connect(ail_invert.y, wing.delta_r))
+  push!(__eqs, connect(fuselage.frame_a, frame_datum))
   push!(__eqs, connect(fuselage.frame_a, fus_mount.frame_a, fus_vis.frame_a))
   push!(__eqs, connect(fus_mount.frame_b, fus_drag.frame_a))
   push!(__eqs, connect(air, fus_drag.air))
@@ -431,6 +605,26 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
       push!(__eqs, connect(downwash.w_dw, htail.w_induced))
     else
     end
+  else
+  end
+  if has_gear
+    push!(__eqs, connect(fuselage.frame_a, mainwheel_l_mount.frame_a))
+    push!(__eqs, connect(mainwheel_l_mount.frame_b, mainwheel_l.frame_a))
+    push!(__eqs, connect(fuselage.frame_a, mainwheel_r_mount.frame_a))
+    push!(__eqs, connect(mainwheel_r_mount.frame_b, mainwheel_r.frame_a))
+    push!(__eqs, connect(fuselage.frame_a, tailwheel_mount.frame_a))
+    push!(__eqs, connect(tailwheel_mount.frame_b, tailwheel.frame_a))
+    push!(__eqs, connect(fuselage.frame_a, tipskid_l_mount.frame_a))
+    push!(__eqs, connect(tipskid_l_mount.frame_b, tipskid_l.frame_a))
+    push!(__eqs, connect(fuselage.frame_a, tipskid_r_mount.frame_a))
+    push!(__eqs, connect(tipskid_r_mount.frame_b, tipskid_r.frame_a))
+  else
+  end
+  if has_engine
+    push!(__eqs, connect(fuselage.frame_a, prop_mount.frame_a))
+    push!(__eqs, connect(prop_mount.frame_b, propeller.frame_a))
+    push!(__eqs, connect(air, propeller.air))
+    push!(__eqs, connect(throttle, propeller.throttle))
   else
   end
   if has_vtail

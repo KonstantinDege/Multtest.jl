@@ -34,15 +34,15 @@ than a uniform bus.
 """
 component Atmosphere
   "Air state supplied to every aerodynamic element"
-  air = AirState()
+  air = AirState() {^air}
   "Geometric altitude, world y"
-  altitude = RealInput() if isa_density
+  altitude = RealInput() if isa_density {^altitude}
   "Commanded wind velocity, world frame, x component"
-  v_wind_x_in = RealInput() if wind_input
+  v_wind_x_in = RealInput() if wind_input {^v_wind_x_in}
   "Commanded wind velocity, world frame, y component"
-  v_wind_y_in = RealInput() if wind_input
+  v_wind_y_in = RealInput() if wind_input {^v_wind_y_in}
   "Commanded wind velocity, world frame, z component"
-  v_wind_z_in = RealInput() if wind_input
+  v_wind_z_in = RealInput() if wind_input {^v_wind_z_in}
 
   "Take the density from the ISA troposphere and the altitude input"
   structural parameter isa_density::Boolean = false
@@ -80,6 +80,29 @@ relations
     air.v_wind_y = v_wind_0[2]
     air.v_wind_z = v_wind_0[3]
   end
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/Atmosphere.svg"},
+    "doc": {"behavior": false}
+  },
+  "_links": {
+    "air": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}
+    },
+    "altitude": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 180, "x2": 50, "y2": 280}}}
+    },
+    "v_wind_x_in": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 430, "x2": 50, "y2": 530}}}
+    },
+    "v_wind_y_in": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 580, "x2": 50, "y2": 680}}}
+    },
+    "v_wind_z_in": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 730, "x2": 50, "y2": 830}}}
+    }
+  }
+}
 end
 
 """
@@ -89,13 +112,18 @@ The altitude input is ramped from sea level to 5000 m and the resulting
 density is compared with the standard atmosphere table.
 """
 test component TestAtmosphereISA
-  atm = Atmosphere(isa_density = true, rho0 = 1.225)
+  atm = Atmosphere(isa_density = true, rho0 = 1.225) {^atm}
   "Altitude reached at the end of the ramp"
   parameter h_end::Length = 5000.0
   "Duration of the ramp"
   parameter t_ramp::Time = 1.0
 relations
   atm.altitude = h_end * time / t_ramp
+metadata {
+  "_links": {
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 450, "y1": 400, "x2": 550, "y2": 500}}}}
+  }
+}
 end
 
 """
@@ -108,14 +136,14 @@ wind is a headwind plus an updraught, which must raise both the dynamic
 pressure and the incidence relative to the still-air case.
 """
 test component TestAtmosphereWind
-  world = MultibodyComponents.World(render = false)
-  atm = Atmosphere(rho0 = 1.225, v_wind_0 = [-10.0, 3.0, 0.0])
-  mover1 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  mover2 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 5.0], render = false)
-  mover3 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, -5.0], render = false)
-  surf1 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012)
-  surf2 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012)
-  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9)
+  world = MultibodyComponents.World(render = false) {^world}
+  atm = Atmosphere(rho0 = 1.225, v_wind_0 = [-10.0, 3.0, 0.0]) {^atm}
+  mover1 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false) {^mover1}
+  mover2 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 5.0], render = false) {^mover2}
+  mover3 = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, -5.0], render = false) {^mover3}
+  surf1 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012) {^surf1}
+  surf2 = AeroSurface(S = 5.0, c = 0.72, AR = 21.4, CL0 = 0.0, CL_alpha = 5.5, CD0 = 0.012) {^surf2}
+  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9) {^drag}
   "Ground speed of all three carriers, along world x"
   parameter V_ground::Velocity = 25.0
 relations
@@ -128,8 +156,34 @@ relations
   mover3.v_x = V_ground
   mover3.v_y = 0
   mover3.v_z = 0
-  connect(atm.air, surf1.air, surf2.air, drag.air)
-  connect(mover1.frame_b, surf1.frame_a)
-  connect(mover2.frame_b, surf2.frame_a)
-  connect(mover3.frame_b, drag.frame_a)
+  connect(atm.air, surf1.air, surf2.air, drag.air) {^id1}
+  connect(mover1.frame_b, surf1.frame_a) {^id2}
+  connect(mover2.frame_b, surf2.frame_a) {^id3}
+  connect(mover3.frame_b, drag.frame_a) {^id4}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 40, "y1": 820, "x2": 140, "y2": 920}}}},
+    "atm": {"Dyad": {"placement": {"diagram": {"x1": 880, "y1": 400, "x2": 980, "y2": 500}}}},
+    "mover1": {"Dyad": {"placement": {"diagram": {"x1": 180, "y1": 120, "x2": 280, "y2": 220}}}},
+    "surf1": {"Dyad": {"placement": {"diagram": {"x1": 480, "y1": 120, "x2": 580, "y2": 220}}}},
+    "mover2": {"Dyad": {"placement": {"diagram": {"x1": 180, "y1": 400, "x2": 280, "y2": 500}}}},
+    "surf2": {"Dyad": {"placement": {"diagram": {"x1": 480, "y1": 400, "x2": 580, "y2": 500}}}},
+    "mover3": {"Dyad": {"placement": {"diagram": {"x1": 180, "y1": 680, "x2": 280, "y2": 780}}}},
+    "drag": {"Dyad": {"placement": {"diagram": {"x1": 480, "y1": 680, "x2": 580, "y2": 780}}}},
+    "id1": {
+      "Dyad": {
+        "edges": [
+          {"S": 1, "M": [], "E": -1},
+          {"S": -1, "M": [{"x": 760, "y": 170}], "E": 2},
+          {"S": -1, "M": [], "E": 3},
+          {"S": -1, "M": [{"x": 760, "y": 730}], "E": 4}
+        ],
+        "junctions": [{"x": 760, "y": 450}]
+      }
+    },
+    "id2": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id3": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}},
+    "id4": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
 end

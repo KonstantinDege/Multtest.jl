@@ -65,12 +65,13 @@ relations
   frame_a.f = -F_s
   frame_a.tau = [0, 0, 0]
 metadata {
+  "Dyad": {"icons": {"default": "dyad://Multtest/DragBody.svg"}},
   "_links": {
     "frame_a": {
-      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 450, "y2": 550}}}
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}
     },
     "air": {
-      "Dyad": {"placement": {"diagram": {"x1": 950, "x2": 1050, "y1": 450, "y2": 550}}}
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50}}}
     }
   }
 }
@@ -85,15 +86,23 @@ the drag is the only thing balancing gravity, so getting the magnitude or
 the sign wrong is immediately visible.
 """
 test component TestDragTerminal
-  world = MultibodyComponents.World()
-  body = MultibodyComponents.Body(m = 1.0, orientation_state = MultibodyComponents.OrientationState.Quaternion(), statePriority = 1000, linearStatePriority = 1000)
-  drag = DragBody(CdA_x = 0.5, CdA_y = 0.5, CdA_z = 0.5)
+  world = MultibodyComponents.World() {^world}
+  body = MultibodyComponents.Body(m = 1.0, orientation_state = MultibodyComponents.OrientationState.Quaternion(), statePriority = 1000, linearStatePriority = 1000) {^body}
+  drag = DragBody(CdA_x = 0.5, CdA_y = 0.5, CdA_z = 0.5) {^drag}
 relations
   drag.air.rho = 1.225
   drag.air.v_wind_x = 0
   drag.air.v_wind_y = 0
   drag.air.v_wind_z = 0
-  connect(body.frame_a, drag.frame_a)
+  connect(body.frame_a, drag.frame_a) {^id1}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 60, "y1": 620, "x2": 160, "y2": 720}}}},
+    "body": {"Dyad": {"placement": {"diagram": {"x1": 300, "y1": 330, "x2": 400, "y2": 430}}}},
+    "drag": {"Dyad": {"placement": {"diagram": {"x1": 640, "y1": 330, "x2": 740, "y2": 430}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
 end
 
 """
@@ -104,9 +113,9 @@ through a full circle in the body x-y plane; each force component must
 follow `-0.5*rho*|v|*CdA_i*v_i` with its own drag area.
 """
 test component TestDragAnisotropy
-  world = MultibodyComponents.World(render = false)
-  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9)
+  world = MultibodyComponents.World(render = false) {^world}
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false) {^mover}
+  drag = DragBody(CdA_x = 0.08, CdA_y = 1.2, CdA_z = 0.9) {^drag}
   "Speed held constant through the sweep"
   parameter V_test::Velocity = 30.0
   "Duration of one full turn of the velocity vector"
@@ -122,5 +131,13 @@ relations
   drag.air.v_wind_x = 0
   drag.air.v_wind_y = 0
   drag.air.v_wind_z = 0
-  connect(mover.frame_b, drag.frame_a)
+  connect(mover.frame_b, drag.frame_a) {^id1}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 60, "y1": 620, "x2": 160, "y2": 720}}}},
+    "mover": {"Dyad": {"placement": {"diagram": {"x1": 300, "y1": 330, "x2": 400, "y2": 430}}}},
+    "drag": {"Dyad": {"placement": {"diagram": {"x1": 640, "y1": 330, "x2": 740, "y2": 430}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
 end

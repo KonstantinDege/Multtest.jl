@@ -17,6 +17,12 @@ connector AirState
   potential v_wind_y::Velocity
   "Wind velocity, world frame, z component (world z is to the right)"
   potential v_wind_z::Velocity
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/AirState.svg"},
+    "path": {"stroke": "rgb(47,159,208)"}
+  }
+}
 end
 
 """
@@ -227,18 +233,22 @@ relations
   frame_a.f = -F_s
   frame_a.tau = -[0, 0, q * S * c * CM]
 metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/AeroSurface.svg"},
+    "doc": {"behavior": false}
+  },
   "_links": {
     "frame_a": {
-      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 450, "y2": 550}}}
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}
     },
     "air": {
-      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 550, "y1": -50, "y2": 50}}}
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50}}}
     },
     "delta": {
-      "Dyad": {"placement": {"diagram": {"x1": 450, "x2": 560, "y1": 950, "y2": 1050}}}
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": 950, "x2": 550, "y2": 1050}}}
     },
     "w_induced": {
-      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 440, "y2": 540}}}
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}
     }
   }
 }
@@ -273,13 +283,13 @@ no force. Airspeed appears in a denominator and is clamped with `v_eps`.
 """
 component Downwash
   "Sensor frame, used only for the flight speed; exerts no force"
-  frame_a = Frame3D()
+  frame_a = Frame3D() {^frame_a}
   "Density and wind"
-  air = AirState()
+  air = AirState() {^air}
   "Lift of the upstream surface"
-  L_up = RealInput()
+  L_up = RealInput() {^L_up}
   "Downwash velocity at the downstream surface, positive downward"
-  w_dw = RealOutput()
+  w_dw = RealOutput() {^w_dw}
   "Span of the upstream surface"
   parameter b::Length = 15.0
   "Fraction of the far-field downwash seen; 1 for a tail several chords behind"
@@ -293,6 +303,23 @@ relations
   frame_a.tau = [0, 0, 0]
   V = sqrt((der(frame_a.r_0[1]) - air.v_wind_x) ^ 2 + (der(frame_a.r_0[2]) - air.v_wind_y) ^ 2 + (der(frame_a.r_0[3]) - air.v_wind_z) ^ 2 + v_eps ^ 2)
   w_dw = k * 4 * L_up / (3.141592653589793 * air.rho * V * b ^ 2)
+metadata {
+  "Dyad": {"icons": {"default": "dyad://Multtest/Downwash.svg"}},
+  "_links": {
+    "frame_a": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 650, "x2": 50, "y2": 750}}}
+    },
+    "air": {
+      "Dyad": {"placement": {"icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50}}}
+    },
+    "L_up": {
+      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 250, "x2": 50, "y2": 350}}}
+    },
+    "w_dw": {
+      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}
+    }
+  }
+}
 end
 
 """
@@ -305,9 +332,9 @@ attached, stalled and reverse-flow regimes without ever changing the
 panel's attitude.
 """
 test component TestAeroSweep
-  world = MultibodyComponents.World(render = false)
-  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26)
+  world = MultibodyComponents.World(render = false) {^world}
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false) {^mover}
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26) {^surf}
   "Airspeed held constant through the sweep"
   parameter V_test::Velocity = 25.0
   "Duration of one full turn of the velocity vector"
@@ -323,7 +350,15 @@ relations
   surf.air.v_wind_x = 0
   surf.air.v_wind_y = 0
   surf.air.v_wind_z = 0
-  connect(mover.frame_b, surf.frame_a)
+  connect(mover.frame_b, surf.frame_a) {^id1}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 60, "y1": 620, "x2": 160, "y2": 720}}}},
+    "mover": {"Dyad": {"placement": {"diagram": {"x1": 300, "y1": 330, "x2": 400, "y2": 430}}}},
+    "surf": {"Dyad": {"placement": {"diagram": {"x1": 640, "y1": 330, "x2": 740, "y2": 430}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
 end
 
 """
@@ -333,9 +368,9 @@ Checks that the panel is well conditioned at and near zero airspeed and
 that the force grows as the square of the airspeed.
 """
 test component TestAeroSpeedRamp
-  world = MultibodyComponents.World(render = false)
-  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false)
-  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26)
+  world = MultibodyComponents.World(render = false) {^world}
+  mover = MultibodyComponents.PrescribedVelocity(r_start = [0.0, 0.0, 0.0], render = false) {^mover}
+  surf = AeroSurface(S = 10.5, c = 0.72, AR = 21.4, e_oswald = 0.9, CL0 = 0.2, CL_alpha = 5.5, CD0 = 0.012, CM0 = -0.05, alpha_stall = 0.26) {^surf}
   "Incidence held constant through the ramp"
   parameter alpha_test::Angle = 0.0873
   "Airspeed reached at the end of the ramp"
@@ -353,5 +388,13 @@ relations
   surf.air.v_wind_x = 0
   surf.air.v_wind_y = 0
   surf.air.v_wind_z = 0
-  connect(mover.frame_b, surf.frame_a)
+  connect(mover.frame_b, surf.frame_a) {^id1}
+metadata {
+  "_links": {
+    "world": {"Dyad": {"placement": {"diagram": {"x1": 60, "y1": 620, "x2": 160, "y2": 720}}}},
+    "mover": {"Dyad": {"placement": {"diagram": {"x1": 300, "y1": 330, "x2": 400, "y2": 430}}}},
+    "surf": {"Dyad": {"placement": {"diagram": {"x1": 640, "y1": 330, "x2": 740, "y2": 430}}}},
+    "id1": {"Dyad": {"edges": [{"S": 1, "M": [], "E": 2}]}}
+  }
+}
 end

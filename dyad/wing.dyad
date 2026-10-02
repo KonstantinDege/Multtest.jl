@@ -157,18 +157,42 @@ relations
     L_total = panel_l.L
   end
 metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/Wing.svg"},
+    "doc": {"behavior": false}
+  },
   "_links": {
     "frame_a": {
-      "Dyad": {"placement": {"diagram": {"x1": -60, "x2": 40, "y1": 450, "y2": 550}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 450, "y1": 950, "x2": 550, "y2": 1050},
+          "diagram": {"x1": -60, "x2": 40, "y1": 450, "y2": 550}
+        }
+      }
     },
     "air": {
-      "Dyad": {"placement": {"diagram": {"x1": -50, "x2": 50, "y1": 230, "y2": 330}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 450, "y1": -50, "x2": 550, "y2": 50},
+          "diagram": {"x1": -50, "x2": 50, "y1": 230, "y2": 330}
+        }
+      }
     },
     "delta_l": {
-      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 40, "y2": 140}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": -50, "y1": 700, "x2": 50, "y2": 800},
+          "diagram": {"x1": 960, "x2": 1060, "y1": 40, "y2": 140}
+        }
+      }
     },
     "delta_r": {
-      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 250, "y2": 350}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 950, "y1": 700, "x2": 1050, "y2": 800},
+          "diagram": {"x1": 960, "x2": 1060, "y1": 250, "y2": 350}
+        }
+      }
     },
     "root": {
       "Dyad": {"placement": {"diagram": {"x1": 140, "x2": 240, "y1": 380, "y2": 480}}}
@@ -210,10 +234,20 @@ metadata {
       "Dyad": {"placement": {"diagram": {"x1": 500, "x2": 600, "y1": 130, "y2": 230}}}
     },
     "w_induced": {
-      "Dyad": {"placement": {"diagram": {"x1": 960, "x2": 1060, "y1": 670, "y2": 770}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 180, "y1": -50, "x2": 280, "y2": 50},
+          "diagram": {"x1": 960, "x2": 1060, "y1": 670, "y2": 770}
+        }
+      }
     },
     "L_total": {
-      "Dyad": {"placement": {"diagram": {"x1": 460, "x2": 560, "y1": 950, "y2": 1050}}}
+      "Dyad": {
+        "placement": {
+          "icon": {"x1": 720, "y1": -50, "x2": 820, "y2": 50},
+          "diagram": {"x1": 460, "x2": 560, "y1": 950, "y2": 1050}
+        }
+      }
     },
     "id20": {
       "Dyad": {

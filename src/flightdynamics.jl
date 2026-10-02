@@ -15,6 +15,15 @@
 # Dyad model's internals; they only assume the free-flying base is a
 # `MultibodyComponents.Body` carrying `r_0`, `v_0`, `w_a` and a quaternion
 # `Q_hat`, and that the frame convention is x forward, y up, z right.
+#
+# AUXILIARY STATES. An airframe is not always the whole state vector. A
+# propeller carries its shaft speed, and that shaft has to be in equilibrium
+# too or the "trim" is nothing of the sort --- leave it out and the solver
+# happily returns an answer with the propeller stopped, which silently removes
+# both the thrust and the windmilling drag. Pass such states as `aux` and they
+# are solved for alongside the flight variables. `trim_glide` returns the full
+# trimmed state vector `u`, and every function downstream takes that rather
+# than rebuilding it, so the two can never drift apart.
 
 using LinearAlgebra
 using ModelingToolkit: unknowns
@@ -56,35 +65,54 @@ function StateLayout(sys, body)
 end
 
 """
-    glide_state(L, V, gamma, theta; altitude)
+    state_index(sys, v)
+
+Index of any other state, for passing to `trim_glide` as an auxiliary unknown.
+Use it for a propeller shaft speed: `state_index(sys, sys.glider.propeller.n)`.
+"""
+function state_index(sys, v)
+    i = SII.variable_index(sys, v)
+    isnothing(i) && error("state $v is not an unknown of the simplified system")
+    i
+end
+
+"""
+    glide_state(L, V, gamma, theta; altitude, aux, aux_vals)
 
 State vector for a symmetric, wings-level glide: airspeed `V` along a flight
 path `gamma`, pitch attitude `theta`, zero body rates and no sideslip. The
 incidence that results is `theta - gamma`.
 
 Pitch is a rotation about the body z axis, so the attitude quaternion
-`[w,i,j,k]` is `[cos(theta/2), 0, 0, sin(theta/2)]`.
+`[w,i,j,k]` is `[cos(theta/2), 0, 0, sin(theta/2)]`. Any auxiliary states are
+written in at the indices given by `aux`.
 """
-function glide_state(L::StateLayout, V, gamma, theta; altitude = 500.0)
+function glide_state(L::StateLayout, V, gamma, theta; altitude = 500.0,
+                     aux = Int[], aux_vals = Float64[])
     u = zeros(L.n)
     u[L.v0[1]] = V * cos(gamma)
     u[L.v0[2]] = V * sin(gamma)
     u[L.r[2]]  = altitude
     u[L.q[1]]  = cos(theta / 2)
     u[L.q[4]]  = sin(theta / 2)
+    for (k, i) in pairs(aux)
+        u[i] = aux_vals[k]
+    end
     u
 end
 
 """
-    trim_glide(prob, L, V; control, x0, altitude, tol, maxiter)
+    trim_glide(prob, L, V; control, aux, aux0, x0, altitude, tol, maxiter)
 
-Find the steady glide at airspeed `V`: solve for the flight path angle, the
-pitch attitude and the trim `control` (a symbolic parameter, normally the
-elevator) that drive the two velocity residuals and the pitch acceleration to
-zero.
+Find the steady flight condition at airspeed `V`: solve for the flight path
+angle, the pitch attitude, the trim `control` (a symbolic parameter, normally
+the elevator) and any auxiliary states, such that the two velocity residuals,
+the pitch acceleration and the auxiliary derivatives all vanish.
 
-Three unknowns against three equations, so the trim is unique for a given `V`;
-sweep `V` to walk the glide polar. Returns a named tuple carrying the solution,
+Three unknowns plus one per auxiliary state, against the same number of
+equations, so the trim is unique for a given `V`; sweep `V` to walk the polar.
+
+Returns a named tuple carrying the solution, the full trimmed state vector `u`,
 the residual norm and a `converged` flag --- **check it**. Below the stall the
 required lift coefficient exceeds `CL_max`, no trim exists, and Newton will
 happily wander off to a nonsensical answer; a continuation sweep that feeds the
@@ -92,26 +120,33 @@ previous solution forward will then poison every point after it.
 """
 function trim_glide(prob, L::StateLayout, V;
                     control, x0 = [-0.02, 0.03, 0.0], altitude = 500.0,
-                    tol = 1e-11, maxiter = 60,
+                    aux = Int[], aux0 = zeros(length(aux)),
+                    tol = 1e-11, maxiter = 80,
                     gamma_max = 0.5, control_max = 0.5)
     f! = prob.f
     du = zeros(L.n)
+    na = length(aux)
+    nx = 3 + na
+
+    function state_of(x)
+        glide_state(L, V, x[1], x[2]; altitude, aux, aux_vals = x[4:end])
+    end
     function residual(x)
         prob.ps[control] = x[3]
-        f!(du, glide_state(L, V, x[1], x[2]; altitude), prob.p, 0.0)
-        [du[L.v0[1]], du[L.v0[2]], du[L.w[3]]]
+        f!(du, state_of(x), prob.p, 0.0)
+        vcat([du[L.v0[1]], du[L.v0[2]], du[L.w[3]]], [du[i] for i in aux])
     end
 
-    x = collect(float.(x0))
+    x = vcat(collect(float.(x0[1:3])), collect(float.(aux0)))
     r = residual(x)
     iters = 0
     singular = false
     for it in 1:maxiter
         iters = it
         norm(r) < tol && break
-        J = zeros(3, 3)
-        for j in 1:3
-            dx = copy(x); h = 1e-7; dx[j] += h
+        J = zeros(nx, nx)
+        for j in 1:nx
+            dx = copy(x); h = 1e-7 * max(1.0, abs(x[j])); dx[j] += h
             J[:, j] = (residual(dx) .- r) ./ h
         end
         # A singular Jacobian is a legitimate outcome, not a bug: it is what a
@@ -131,7 +166,9 @@ function trim_glide(prob, L::StateLayout, V;
 
     converged = !singular && norm(r) < 1e-9 && abs(x[1]) < gamma_max &&
                 abs(x[3]) < control_max && all(isfinite, x)
-    (gamma = x[1], theta = x[2], control = x[3], x = x,
+    prob.ps[control] = x[3]
+    (gamma = x[1], theta = x[2], control = x[3], aux = x[4:end], x = x,
+     u = state_of(x), aux_idx = aux,
      alpha = x[2] - x[1], LD = -1 / tan(x[1]), sink = -V * sin(x[1]),
      residual = norm(r), iterations = iters, converged = converged)
 end
@@ -156,7 +193,7 @@ function jacobian_at(prob, u, t = 0.0)
 end
 
 """
-    longitudinal_indices(L) / lateral_indices(L)
+    longitudinal_indices(L; aux) / lateral_indices(L)
 
 At a symmetric trim the Jacobian block-diagonalises. Splitting it before taking
 eigenvalues is what lets the phugoid be identified unambiguously: an aircraft
@@ -164,12 +201,16 @@ with a weak fin has lateral modes at a similar frequency, and picking "the
 slowest oscillation" out of the full spectrum will sooner or later pick the
 wrong one.
 
+Auxiliary states belong to the longitudinal block --- a propeller shaft couples
+to airspeed through thrust, and symmetrically, so it has no lateral content.
+
 Position states are excluded --- they are pure integrators that feed nothing
 back while the density is uniform, and they would only contribute zero
 eigenvalues.
 """
-longitudinal_indices(L::StateLayout) = [L.w[3], L.v0[2], L.v0[1], L.q[4], L.q[1]]
-lateral_indices(L::StateLayout)      = [L.w[2], L.w[1], L.v0[3], L.q[3], L.q[2]]
+longitudinal_indices(L::StateLayout; aux = Int[]) =
+    vcat([L.w[3], L.v0[2], L.v0[1], L.q[4], L.q[1]], collect(aux))
+lateral_indices(L::StateLayout) = [L.w[2], L.w[1], L.v0[3], L.q[3], L.q[2]]
 
 """
     modes(J, idx)
@@ -188,34 +229,34 @@ function modes(J, idx)
 end
 
 """
-    trim_and_modes(prob, L, V; control, x0, altitude)
+    trim_and_modes(prob, L, V; control, aux, aux0, x0, altitude)
 
 Trim at `V`, then report the longitudinal and lateral modes there. The phugoid
 is the first longitudinal entry and the short period the last oscillatory one.
 """
 function trim_and_modes(prob, L::StateLayout, V; control, x0 = [-0.02, 0.03, 0.0],
-                        altitude = 500.0)
-    tr = trim_glide(prob, L, V; control, x0, altitude)
+                        aux = Int[], aux0 = zeros(length(aux)), altitude = 500.0)
+    tr = trim_glide(prob, L, V; control, x0, altitude, aux, aux0)
     tr.converged || return (trim = tr, lon = nothing, lat = nothing, J = nothing)
-    prob.ps[control] = tr.control
-    u = glide_state(L, V, tr.gamma, tr.theta; altitude)
-    J = jacobian_at(prob, u)
-    (trim = tr, lon = modes(J, longitudinal_indices(L)),
+    J = jacobian_at(prob, tr.u)
+    (trim = tr, lon = modes(J, longitudinal_indices(L; aux)),
      lat = modes(J, lateral_indices(L)), J = J)
 end
 
 """
-    stability_derivatives(prob, L, tr, V; control, altitude)
+    stability_derivatives(prob, L, tr, V; control)
 
 Dimensional longitudinal derivatives in body axes at a trim point, by
-perturbing the body-axis velocity components and the pitch rate.
+perturbing the body-axis velocity components and the pitch rate about the
+trimmed state `tr.u` --- auxiliary states included, so a propeller stays at its
+trimmed shaft speed rather than being reset.
 
 `w` is the *downward* body velocity, so `w = -v_body_y` in this frame's
 x-forward, y-up convention, and `Z` is positive down. These are the quantities
 to compare against handbook expressions: `Z_w` against `-rho*V*S*a/(2m)` and
 `M_q` against `-rho*V*S_t*l_t^2*a_t/(2*I_pitch)`.
 """
-function stability_derivatives(prob, L::StateLayout, tr, V; control, altitude = 500.0)
+function stability_derivatives(prob, L::StateLayout, tr, V; control)
     prob.ps[control] = tr.control
     th = tr.theta
     R  = [cos(th) sin(th) 0.0; -sin(th) cos(th) 0.0; 0.0 0.0 1.0]  # world -> body
@@ -223,7 +264,7 @@ function stability_derivatives(prob, L::StateLayout, tr, V; control, altitude = 
     du = zeros(L.n)
     function forces(d_u, d_w, d_q)
         v0 = R' * [ub + d_u, -(wb + d_w), 0.0]
-        u = glide_state(L, V, tr.gamma, tr.theta; altitude)
+        u = copy(tr.u)
         u[L.v0[1]] = v0[1]; u[L.v0[2]] = v0[2]; u[L.v0[3]] = v0[3]
         u[L.w[3]]  = d_q
         prob.f(du, u, prob.p, 0.0)
@@ -241,10 +282,10 @@ function stability_derivatives(prob, L::StateLayout, tr, V; control, altitude = 
 end
 
 """
-    lateral_derivatives(prob, L, tr, V; control, altitude)
+    lateral_derivatives(prob, L, tr, V; control)
 
 Dimensional lateral derivatives at a trim point, by perturbing the sideslip
-velocity and the roll and yaw rates.
+velocity and the roll and yaw rates about the trimmed state.
 
 Sign conventions in this frame (x forward, y up, z right) are not the textbook
 ones and are worth stating: `v` is the body z velocity, positive to the right;
@@ -259,7 +300,7 @@ a positive roll rate `w_a[1]` is right wing **down**; a positive yaw rate
 `Lp` and `Lv` are produced entirely by where the wing panels sit; nothing
 supplies them as coefficients.
 """
-function lateral_derivatives(prob, L::StateLayout, tr, V; control, altitude = 500.0)
+function lateral_derivatives(prob, L::StateLayout, tr, V; control)
     prob.ps[control] = tr.control
     th = tr.theta
     R  = [cos(th) sin(th) 0.0; -sin(th) cos(th) 0.0; 0.0 0.0 1.0]
@@ -267,7 +308,7 @@ function lateral_derivatives(prob, L::StateLayout, tr, V; control, altitude = 50
     du = zeros(L.n)
     function acc(dv, dp, dr)
         v0 = R' * [ub, -wb, dv]
-        u = glide_state(L, V, tr.gamma, tr.theta; altitude)
+        u = copy(tr.u)
         u[L.v0[1]] = v0[1]; u[L.v0[2]] = v0[2]; u[L.v0[3]] = v0[3]
         u[L.w[1]] = dp; u[L.w[2]] = dr
         prob.f(du, u, prob.p, 0.0)
@@ -285,18 +326,22 @@ function lateral_derivatives(prob, L::StateLayout, tr, V; control, altitude = 50
 end
 
 """
-    glide_polar(prob, L, Vs; control, altitude)
+    glide_polar(prob, L, Vs; control, aux, aux0, altitude)
 
 Trim across a range of airspeeds by continuation, feeding each solution forward
 as the next guess. Points that fail to converge (below the stall, typically)
 come back with `converged = false` and do **not** seed the next point.
 """
 function glide_polar(prob, L::StateLayout, Vs; control, x0 = [-0.02, 0.03, 0.0],
-                     altitude = 500.0)
-    seed = collect(float.(x0))
+                     aux = Int[], aux0 = zeros(length(aux)), altitude = 500.0)
+    seed = collect(float.(x0[1:3]))
+    seed_aux = collect(float.(aux0))
     map(Vs) do V
-        tr = trim_glide(prob, L, V; control, x0 = seed, altitude)
-        tr.converged && (seed = tr.x)
+        tr = trim_glide(prob, L, V; control, x0 = seed, aux, aux0 = seed_aux, altitude)
+        if tr.converged
+            seed = tr.x[1:3]
+            seed_aux = tr.aux
+        end
         (V = V, trim = tr)
     end
 end

@@ -25,7 +25,19 @@ using LinearAlgebra
 const FD = Multtest
 
 build(nm::Symbol) = multibody(getfield(Multtest, nm)(; name = nm))
-sim(sys, T; kw...) = solve(ODEProblem(sys, [], (0.0, T)), reltol = 1e-10, abstol = 1e-10; kw...)
+sim(sys, T; tol = 1e-10, kw...) =
+    solve(ODEProblem(sys, [], (0.0, T)), reltol = tol, abstol = tol; kw...)
+
+# Attitude out of a frame's rotation matrix. Column 2 of `R` is the world
+# vertical resolved in body axes, which in this frame convention is
+# [sin(theta), cos(theta)*cos(phi), -cos(theta)*sin(phi)]; the heading follows
+# from the nose axis. Exact for any attitude short of nose-vertical.
+function attitude(sol, frame, t)
+    R = [sol(t, idxs = frame.R[i, j]) for i in 1:3, j in 1:3]
+    (theta = atan(R[1, 2], hypot(R[2, 2], R[3, 2])),
+     phi   = atan(-R[3, 2], R[2, 2]),
+     psi   = atan(-R[1, 3], R[1, 1]))
+end
 
 # Reference geometry, mirroring the defaults in dyad/glider.dyad.
 const M_AC   = 350.0                 # total mass  [kg]
@@ -39,13 +51,26 @@ const Y_PAN  = B_W / (2 * sqrt(3.0)) # spanwise station of the wing panels
 const A_W    = 5.7                   # wing lift curve slope [1/rad]
 const A_TOT  = A_W + 4.4 / S_W + 2.1 / S_W   # aircraft lift slope, wing + tail + body
 
+# Motor glider, mirroring dyad/motorglider.dyad. The mass is the weight the
+# reference polar was computed at, not the 650 kg maximum take-off weight.
+const M_MG   = 468.0
+const S_MG   = 18.20
+const B_MG   = 15.30
+const V_S_MG = 16.75                 # stall speed, engine off [m/s]
+
 # ---------------------------------------------------------------------------
 @testset "structure: every harness reduces to a pure ODE" begin
     expected = Dict(:TestAeroSweep => 2, :TestAeroSpeedRamp => 2,
                     :TestDragTerminal => 13, :TestDragAnisotropy => 2,
                     :TestAtmosphereWind => 3, :TestGliderWingOnly => 13,
                     :TestGliderNoFin => 13, :TestGlider => 13,
-                    :TestGliderAileronStep => 13)
+                    :TestGliderAileronStep => 13,
+                    :TestPropellerStatic => 2, :TestGroundContactDrop => 13,
+                    # the propeller shaft speed is the fourteenth state
+                    :TestMotorGlider => 14, :TestMotorGliderFeathered => 13,
+                    :TestMotorGliderParked => 14,
+                    # and the pilot's two integrators the fifteenth and sixteenth
+                    :TestMotorGliderClimb => 16, :TestMotorGliderTakeoff => 16)
     for (nm, n) in expected
         sys = build(nm)
         @test length(unknowns(sys)) == n
@@ -462,4 +487,245 @@ end
     bank = 2 * atan(x, w)
     @test bank > 0                                  # rolled right, as commanded
     @test beta > 0                                  # slipping right: adverse
+end
+
+
+# ---------------------------------------------------------------------------
+@testset "Propeller" begin
+    sys = build(:TestPropellerStatic)
+    settle(ps; T = 25.0) = solve(ODEProblem(sys, ps, (0.0, T)),
+                                 reltol = 1e-10, abstol = 1e-10)
+    T = 25.0
+
+    # PHYSICS: the shaft speed is a state, so the operating point is where the
+    # engine torque and the propeller torque balance -- nothing imposes it
+    for V in (0.0, 25.0, 45.0)
+        s = settle([sys.V_test => V])
+        @test s(T, idxs = sys.prop.Q_eng) ≈ s(T, idxs = sys.prop.Q_prop) rtol = 1e-6
+    end
+
+    s0 = settle([sys.V_test => 0.0])
+    # ANCHOR: static thrust and the shaft speed it comes at
+    @test s0(T, idxs = sys.prop.T) ≈ 1392.0 rtol = 0.01
+    @test 60 * s0(T, idxs = sys.prop.n) ≈ 2447.0 rtol = 0.01
+    # PHYSICS: static thrust cannot beat momentum theory. The ideal thrust for
+    # the shaft power actually delivered is (2*rho*A*P^2)^(1/3), and a real
+    # fixed-pitch propeller lands at a figure of merit well under one.
+    A_disc = pi * (1.5 / 2)^2
+    FoM = s0(T, idxs = sys.prop.T) / cbrt(2 * RHO * A_disc * s0(T, idxs = sys.prop.P_shaft)^2)
+    @test 0.45 < FoM < 0.75
+    # PHYSICS: standing still it does no useful work
+    @test s0(T, idxs = sys.prop.eta) == 0.0
+
+    # PHYSICS: thrust falls with airspeed while the shaft speeds up, because
+    # the propeller unloads; efficiency rises but stays under one
+    sp = [settle([sys.V_test => V]) for V in (0.0, 15.0, 25.0, 35.0, 45.0)]
+    @test issorted([s(T, idxs = sys.prop.T) for s in sp], rev = true)
+    @test issorted([s(T, idxs = sys.prop.n) for s in sp])
+    @test issorted([s(T, idxs = sys.prop.eta) for s in sp])
+    @test all(s(T, idxs = sys.prop.eta) < 1 for s in sp)
+
+    # PHYSICS: with the throttle shut the airflow drags the shaft round until
+    # the propeller's own torque vanishes, which is exactly J = CP0/kP, and it
+    # then produces drag rather than thrust
+    sw = settle([sys.V_test => 25.0, sys.thr.k => 0.0, sys.prop.n_start => 20.0]; T = 60.0)
+    @test sw(60.0, idxs = sys.prop.J_adv) ≈ 0.088 / 0.048 rtol = 1e-5
+    @test sw(60.0, idxs = sys.prop.Q_prop) ≈ 0.0 atol = 1e-6
+    @test sw(60.0, idxs = sys.prop.T) < 0
+
+    # PHYSICS: stopped is the other engine-off equilibrium, and it is stable
+    # enough to stay there -- a real stopped propeller does not restart itself
+    ss = settle([sys.V_test => 25.0, sys.thr.k => 0.0, sys.prop.n_start => 0.0]; T = 20.0)
+    @test ss(20.0, idxs = sys.prop.n) ≈ 0.0 atol = 1e-9
+    @test ss(20.0, idxs = sys.prop.T) ≈ 0.0 atol = 1e-9
+end
+
+# ---------------------------------------------------------------------------
+@testset "GroundContact" begin
+    sys = build(:TestGroundContactDrop)
+    sol = sim(sys, 12.0)
+    m, k = 400.0, 1.0e5
+
+    # PHYSICS: released 100 mm clear, the tanh gate leaves nothing behind but
+    # the f_eps floor of the zero clamp -- no phantom lift in flight
+    @test sol(0.0, idxs = sys.contact.pen) ≈ 0.0 atol = 1e-12
+    @test sol(0.0, idxs = sys.contact.Fn) ≈ 0.025 atol = 1e-6
+
+    # PHYSICS: it settles at the static deflection m*g/k and stops there,
+    # rather than bouncing forever or sticking
+    @test sol(12.0, idxs = sys.contact.pen) ≈ m * G / k rtol = 2e-3
+    @test sol(12.0, idxs = sys.contact.Fn) ≈ m * G rtol = 2e-3
+    @test abs(sol(12.0, idxs = sys.body.v_0[2])) < 1e-3
+
+    # PHYSICS: the ground pushes and never pulls, at every instant
+    @test all(sol(t, idxs = sys.contact.Fn) > 0 for t in 0:0.01:12)
+    # PHYSICS: a vertical drop onto a flat plane does not wander off it
+    @test abs(sol(12.0, idxs = sys.body.r_0[1])) < 1e-9
+    @test abs(sol(12.0, idxs = sys.body.r_0[3])) < 1e-9
+end
+
+# ---------------------------------------------------------------------------
+@testset "motor glider engine-off polar" begin
+    sys = build(:TestMotorGliderFeathered)
+    prob = ODEProblem(sys, [], (0.0, 1.0))
+    L = FD.StateLayout(sys, sys.glider.fuselage)
+    seed = [-0.045, 0.03, 0.0]
+
+    # ANCHOR: the three points of the reference SF 25 C engine-off polar, which
+    # is the part of that data that is self-consistent. The drag coefficients
+    # are quoted to two figures, hence the looser tolerance on them.
+    for (V, CLd, CDd, LDd) in ((20.833, 0.95, 0.043, 22.1),
+                               (25.000, 0.66, 0.028, 23.6),
+                               (33.333, 0.37, 0.021, 17.6))
+        tr = FD.trim_glide(prob, L, V; control = sys.elev.k, x0 = seed)
+        @test tr.converged
+        CL = M_MG * G * cos(tr.gamma) / (0.5 * RHO * V^2 * S_MG)
+        @test CL ≈ CLd rtol = 0.01
+        @test CL / tr.LD ≈ CDd rtol = 0.04
+        @test tr.LD ≈ LDd rtol = 0.04
+    end
+
+    pol = FD.glide_polar(prob, L, 16.0:0.25:45.0; control = sys.elev.k, x0 = seed)
+    ok = [p for p in pol if p.trim.converged]
+    @test length(ok) > 100
+    # ANCHOR: the quoted 60 km/h stall is reproduced, which is the check that
+    # CL_max and the polar weight are consistent with each other
+    @test 3.6 * minimum(p.V for p in ok) ≈ 60.0 rtol = 0.02
+    @test maximum(p.trim.LD for p in ok) ≈ 22.93 rtol = 0.02
+    @test minimum(p.trim.sink for p in ok) ≈ 0.912 rtol = 0.03
+end
+
+# ---------------------------------------------------------------------------
+@testset "motor glider: windmilling propeller costs glide" begin
+    # PHYSICS: a windmilling propeller is drag, so the engine-off glide with
+    # the propeller turning must be clearly worse than with none fitted. The
+    # shaft speed has to be trimmed alongside the flight variables or the
+    # solver returns a stopped propeller and the penalty vanishes.
+    sysf = build(:TestMotorGliderFeathered)
+    probf = ODEProblem(sysf, [], (0.0, 1.0))
+    Lf = FD.StateLayout(sysf, sysf.glider.fuselage)
+    trf = FD.trim_glide(probf, Lf, 25.0; control = sysf.elev.k, x0 = [-0.045, 0.03, 0.0])
+
+    sysw = build(:TestMotorGlider)
+    probw = ODEProblem(sysw, [], (0.0, 1.0))
+    Lw = FD.StateLayout(sysw, sysw.glider.fuselage)
+    nidx = FD.state_index(sysw, sysw.glider.propeller.n)
+    trw = FD.trim_glide(probw, Lw, 25.0; control = sysw.elev.k,
+                        x0 = [-0.05, 0.03, 0.0], aux = [nidx], aux0 = [10.0])
+    @test trf.converged && trw.converged
+    @test trw.aux[1] > 1.0                       # genuinely windmilling, not stopped
+    @test trw.LD < trf.LD
+    @test 0.05 < 1 - trw.LD / trf.LD < 0.30      # ANCHOR: a 5-30% penalty
+end
+
+# ---------------------------------------------------------------------------
+@testset "motor glider on the ground" begin
+    sys = build(:TestMotorGliderParked)
+    sol = sim(sys, 30.0; tol = 1e-9)
+    f = sys.glider.fuselage
+    att = attitude(sol, f.frame_a, 30.0)
+    Fl = sol(30.0, idxs = sys.glider.mainwheel_l.Fn)
+    Fr = sol(30.0, idxs = sys.glider.mainwheel_r.Fn)
+    Ft = sol(30.0, idxs = sys.glider.tailwheel.Fn)
+    Sl = sol(30.0, idxs = sys.glider.tipskid_l.Fn)
+    Sr = sol(30.0, idxs = sys.glider.tipskid_r.Fn)
+
+    # PHYSICS: the gear carries the weight, all of it and nothing more
+    @test Fl + Fr + Ft + Sl + Sr ≈ M_MG * G rtol = 1e-4
+    # PHYSICS: a pair of main wheels on a track makes upright a *stable*
+    # equilibrium, so it sits dead level and the tip skids never load. A single
+    # centreline wheel would fall onto a tip from rounding error alone.
+    @test Fl ≈ Fr rtol = 1e-8
+    @test abs(att.phi) < 1e-9
+    @test Sl < 0.03 && Sr < 0.03                 # the f_eps floor and no more
+    # PHYSICS: a taildragger settles nose up on all three wheels
+    @test Ft > 0.02 * M_MG * G
+    @test rad2deg(att.theta) ≈ 6.49 rtol = 0.02
+    @test sol(30.0, idxs = f.r_0[2]) ≈ 0.7805 rtol = 1e-3
+    # PHYSICS: with the throttle shut the propeller stays stopped
+    @test sol(30.0, idxs = sys.glider.propeller.n) ≈ 0.0 atol = 1e-9
+end
+
+# ---------------------------------------------------------------------------
+@testset "Pilot holds the commanded attitude" begin
+    sys = build(:TestMotorGliderClimb)
+    sol = solve(ODEProblem(sys, [], (0.0, 150.0)), reltol = 1e-9, abstol = 1e-9)
+    @test sol.retcode == ReturnCode.Success
+    f = sys.glider.fuselage
+    att = attitude(sol, f.frame_a, 150.0)
+    v = [sol(150.0, idxs = f.v_0[i]) for i in 1:3]
+
+    # PHYSICS: the integral terms mean the commanded attitude is the attitude
+    # that results, not merely the one a proportional loop droops away from
+    @test att.theta ≈ 0.12 rtol = 2e-3
+    @test abs(att.phi) < 1e-4
+    # PHYSICS: a held attitude at a fixed throttle is an equilibrium, so the
+    # climb settles rather than phugoiding -- speed and rate both constant
+    for t in (120.0, 135.0, 150.0)
+        @test norm([sol(t, idxs = f.v_0[i]) for i in 1:3]) ≈ norm(v) rtol = 5e-3
+        @test sol(t, idxs = f.v_0[2]) ≈ v[2] rtol = 5e-3
+    end
+    # ANCHOR: full throttle at this attitude lands on the best rate of climb
+    @test norm(v) ≈ 35.4 rtol = 0.02
+    @test v[2] ≈ 5.75 rtol = 0.03
+    # PHYSICS: the aileron holds a standing deflection against the propeller
+    # torque reaction, and it has to be a right-roll input to oppose a
+    # clockwise propeller
+    @test sol(150.0, idxs = sys.pilot.aileron) > 0
+    # PHYSICS: wings level is wings level, so the aircraft does not turn.
+    # A bank of phi turns at g*tan(phi)/V; with phi driven to zero the only
+    # heading drift left is the aileron's adverse yaw.
+    dpsi = (attitude(sol, f.frame_a, 150.0).psi - attitude(sol, f.frame_a, 100.0).psi) / 50
+    @test abs(dpsi) < 1e-3                       # rad/s
+end
+
+# ---------------------------------------------------------------------------
+@testset "motor glider take-off" begin
+    sys = build(:TestMotorGliderTakeoff)
+    sol = solve(ODEProblem(sys, [], (0.0, 60.0)), reltol = 1e-8, abstol = 1e-8)
+    @test sol.retcode == ReturnCode.Success
+    f = sys.glider.fuselage
+    W = M_MG * G
+    ts = range(0, 60, length = 6001)
+    Fn(t) = sol(t, idxs = sys.glider.mainwheel_l.Fn) +
+            sol(t, idxs = sys.glider.mainwheel_r.Fn) +
+            sol(t, idxs = sys.glider.tailwheel.Fn)
+    V(t) = norm([sol(t, idxs = f.v_0[i]) for i in 1:3])
+
+    t_tail = ts[findfirst(t -> sol(t, idxs = sys.glider.tailwheel.Fn) < 0.01W, ts)]
+    t_lift = ts[findfirst(t -> Fn(t) < 0.01W, ts)]
+
+    # PHYSICS: a taildragger raises the tail well before it flies, and it does
+    # so because elevator authority builds with airspeed
+    @test t_tail < t_lift
+    @test V(t_tail) < 0.5 * V(t_lift)
+    # ANCHOR: ground roll and lift-off speed
+    @test t_lift ≈ 12.0 rtol = 0.05
+    @test sol(t_lift, idxs = f.r_0[1]) ≈ 165.0 rtol = 0.05
+    @test V(t_lift) ≈ 27.0 rtol = 0.03
+    # PHYSICS: it flies off above the stall, with the margin a rotation at
+    # 22 m/s plus a second or two of pitch-up implies
+    @test 1.4 < V(t_lift) / V_S_MG < 1.8
+
+    # PHYSICS: the contacts release cleanly and stay released -- nothing left
+    # behind but the f_eps floor of the three contacts
+    @test all(Fn(t) < 0.1 for t in ts[ts .> t_lift + 1])
+    # PHYSICS: the wing tips never touch, and the propeller never does either
+    @test maximum(sol(t, idxs = sys.glider.tipskid_l.Fn) for t in ts) < 0.03
+    @test minimum(sol(t, idxs = sys.glider.propeller.frame_a.r_0[2]) - 0.75
+                  for t in ts) > 0.05
+
+    # PHYSICS: the pilot keeps it straight. With the propeller torque rolling
+    # it left and the spiral mode divergent, a fixed stick departs into a
+    # climbing left turn; the wings-level loop is what prevents that.
+    @test maximum(abs(attitude(sol, f.frame_a, t).phi) for t in ts) < deg2rad(1.0)
+    @test abs(attitude(sol, f.frame_a, 60.0).psi) < deg2rad(3.0)
+    # PHYSICS: controls stay well inside their travel throughout
+    @test maximum(abs(sol(t, idxs = sys.pilot.elevator)) for t in ts) < deg2rad(10.0)
+
+    # PHYSICS: the climb-out converges on the same attitude-held equilibrium
+    # the free-flight harness finds, which is the check that the ground run
+    # leaves the aircraft in a state the air alone determines from there
+    @test attitude(sol, f.frame_a, 60.0).theta ≈ 0.12 rtol = 0.05
+    @test sol(60.0, idxs = f.v_0[2]) > 5.0
 end
