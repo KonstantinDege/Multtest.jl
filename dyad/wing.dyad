@@ -36,8 +36,8 @@ sideslip angle and its lift becomes a side force.
 component Wing
   "Mount on the fuselage at the aircraft reference point"
   frame_a = Frame3D() {^frame_a}
-  "Density and wind"
-  air = AirState() {^air}
+  "Density and wind, fanned out to the panels"
+  air = AirStateInput() {^air}
   "Left panel control deflection, positive trailing edge down"
   delta_l = RealInput() if has_control {^delta_l}
   "Right panel control deflection, positive trailing edge down"

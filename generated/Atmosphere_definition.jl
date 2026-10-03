@@ -7,11 +7,12 @@
 @doc Markdown.doc"""
    Atmosphere(; name, isa_density, wind_input, rho0, T0, lapse, T_min, v_wind_0)
 
-Supplier for the `AirState` bus: density and wind for the whole aircraft.
+Supplier for the air-state bus: density and wind for the whole aircraft.
 
 One instance feeds every aerodynamic element through a single `connect`,
-because `AirState` carries no flow variable and is therefore a pure
-broadcast.
+because the bus carries no flow variable and is therefore a pure broadcast.
+This component holds the bus's only `AirStateOutput`; everything else on
+the bus carries an `AirStateInput`.
 
 # Density
 
@@ -54,14 +55,46 @@ than a uniform bus.
 
 ## Connectors
 
- * `air` - Broadcast bus carrying the state of the air mass.
+ * `air` - Broadcast bus carrying the state of the air mass --- producing end.
 
-All fields are `potential` and there is no `flow` field, so a single
-`connect` between an atmosphere component and any number of aerodynamic
-consumers simply equates the values: the bus is a pure one-to-many
-broadcast and adds no force or mass balance of its own.
+The bus is a pure one-to-many broadcast: a single `connect` from an
+atmosphere to any number of aerodynamic consumers equates the values and
+adds no force or mass balance of its own. The wind velocity is resolved in
+the **world** frame.
 
-The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
+# Why the bus is causal
+
+The fields are `output` here and `input` on `AirStateInput`, rather than
+`potential` on one shared connector. Two reasons:
+
+1. **It is what the bus actually is.** Air state flows one way. An
+   atmosphere produces it; a panel, a propeller, a drag body or a pitot
+   consumes it. Nothing downstream can push back on the air, because the
+   bus carries no conjugate flow and therefore no power. A `potential`
+   field asserts an equality with no direction, which is weaker than the
+   truth, and it leaves a reader of the diagram no way to see which end of
+   a link is the source.
+2. **It silences a spurious ModelingToolkit warning.** The connector lint
+   in `ModelingToolkitBase` warns when a connector's flow and non-flow
+   variable counts differ, on the assumption that every potential has a
+   conjugate flow. A broadcast bus has none, so four potentials and zero
+   flows tripped it on every instantiation --- fourteen warnings per
+   harness build. Variables marked `input` or `output` are not counted, so
+   a causal bus satisfies the lint honestly rather than by suppressing it.
+   (`Frame3D` fails the same lint and is exempted by an `IsFrame` metadata
+   flag that only the built-in connector carries; it is not reusable here,
+   because the connection code then expects frame orientation metadata.)
+
+What the split does **not** buy, despite the obvious guess: it does not
+catch wiring two atmospheres onto one bus any earlier. That was measured ---
+two `AirStateOutput`s in one connection set and two `potential` connectors
+in one connection set both fail identically, as an unbalanced system with
+more equations than unknowns, and neither reports it as a causality
+conflict. The causality here is documentation and lint-compliance, not a
+new check.
+
+The generated equations are unchanged by the split: same unknowns, same
+equation count, same trajectories. ([`AirStateOutput`](@ref))
  * `altitude` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `v_wind_x_in` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `v_wind_y_in` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
@@ -140,7 +173,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   __constants = Any[]
 
   ### Components
-  push!(__systems, @named air = Multtest.AirState())
+  push!(__systems, @named air = Multtest.AirStateOutput())
 
   ### Check there are no unmatched overrides
   isempty(__overrides) || throw(ArgumentError("overrides: [$(join(keys(__overrides), ", "))] don't match names found in model. These names may exist in the model but could have been conditionally excluded."))

@@ -22,6 +22,7 @@ using MultibodyComponents: multibody
 using OrdinaryDiffEqDefault
 using LinearAlgebra
 using SynchToolkit
+using Statistics                      # NoisyAttitudeSensor: mean, std, cor
 
 const FD = Multtest
 
@@ -30,8 +31,17 @@ const FD = Multtest
 # without it a clocked harness dies with HybridSystemNotSupportedException.
 # It is inert on the continuous harnesses -- same unknowns, same equations,
 # same trajectories -- so it is simplest to pass it everywhere.
-build(nm::Symbol) = multibody(getfield(Multtest, nm)(; name = nm);
-                              additional_passes = [SynchToolkit.compile_lustre])
+#
+# Compiling a harness costs far more than solving it -- minutes against
+# seconds for the clocked ones -- and several harnesses are exercised by more
+# than one testset, so the compiled systems are cached. They are only ever
+# read from here: every test builds its own `ODEProblem`, which takes a fresh
+# copy of the parameters, so nothing leaks from one testset to the next.
+const _SYS = Dict{Symbol, Any}()
+build(nm::Symbol) = get!(_SYS, nm) do
+    multibody(getfield(Multtest, nm)(; name = nm);
+              additional_passes = [SynchToolkit.compile_lustre])
+end
 sim(sys, T; tol = 1e-10, kw...) =
     solve(ODEProblem(sys, [], (0.0, T)), reltol = tol, abstol = tol; kw...)
 
@@ -82,7 +92,10 @@ const V_S_MG = 16.75                 # stall speed, engine off [m/s]
                     # the continuous state vector, so these are back to fourteen
                     :TestMotorGliderClimbDigital => 14,
                     :TestMotorGliderClimbDigitalSlow => 14,
-                    :TestMotorGliderTakeoffDigital => 14)
+                    :TestMotorGliderTakeoffDigital => 14,
+                    # the noisy sensor is clocked too, so it adds no states
+                    # either, despite being a whole second sampled subsystem
+                    :TestMotorGliderClimbDigitalNoisy => 14)
     for (nm, n) in expected
         sys = build(nm)
         @test length(unknowns(sys)) == n
@@ -763,6 +776,68 @@ end
 end
 
 # ---------------------------------------------------------------------------
+@testset "NoisyAttitudeSensor" begin
+    sys = build(:TestMotorGliderClimbDigitalNoisy)
+    sol = solve(ODEProblem(sys, [], (0.0, 200.0)), reltol = 1e-9, abstol = 1e-9)
+    @test sol.retcode == ReturnCode.Success
+
+    # Mid-tick, so the held value of each sample is unambiguous
+    ts = collect(20.0:0.01:60.0) .+ 0.005
+    e_th = [sol(t, idxs = sys.sensor.theta) - sol(t, idxs = sys.sensor.theta_true) for t in ts]
+    e_ph = [sol(t, idxs = sys.sensor.phi)   - sol(t, idxs = sys.sensor.phi_true)   for t in ts]
+    e_V  = [sol(t, idxs = sys.sensor.V)     - sol(t, idxs = sys.sensor.V_true)     for t in ts]
+    cfloor = 1 / sqrt(length(ts))             # sampling floor on a correlation, ~0.016
+
+    # PHYSICS: the reported error is the commanded bias plus noise of the
+    # commanded standard deviation -- nothing else
+    @test mean(e_th) ≈ 0.00873 atol = 3 * 0.002 / sqrt(length(ts))
+    @test abs(mean(e_ph)) < 3 * 0.002 / sqrt(length(ts))
+    @test abs(mean(e_V))  < 3 * 0.3   / sqrt(length(ts))
+    @test std(e_th) ≈ 0.002 rtol = 0.05
+    @test std(e_ph) ≈ 0.002 rtol = 0.05
+    @test std(e_V)  ≈ 0.3   rtol = 0.05
+
+    # PHYSICS: the three channels are independent. This is the property the
+    # stock SampleWithADEffects does NOT give -- with its per-seed noise the
+    # worst pair here measured |corr| = 0.56, which is a common-mode
+    # disturbance rather than sensor noise. NoisyChannel decorrelates by
+    # offsetting the time the RNG is keyed on; if that regresses, this fails.
+    @test abs(cor(e_th, e_ph)) < 4 * cfloor
+    @test abs(cor(e_th, e_V))  < 4 * cfloor
+    @test abs(cor(e_ph, e_V))  < 4 * cfloor
+    # PHYSICS: and white in time -- no autocorrelation from one tick to the next
+    @test abs(cor(e_ph[1:end-1], e_ph[2:end])) < 4 * cfloor
+
+    # PHYSICS: the reading is held between the unit's own 100 Hz ticks
+    @test sol(30.001, idxs = sys.sensor.theta) == sol(30.009, idxs = sys.sensor.theta)
+    @test sol(30.001, idxs = sys.sensor.theta) != sol(30.011, idxs = sys.sensor.theta)
+
+    # PHYSICS: and it lands on the 16-bit quantiser grid over +/- theta_range
+    step = 2 * 1.5708 / 2^16
+    levels = sort(unique(round.([sol(t, idxs = sys.sensor.theta) for t in ts], digits = 12)))
+    gaps = diff(levels)
+    @test minimum(gaps[gaps .> 1e-12]) ≈ step rtol = 1e-3
+
+    # PHYSICS: a bias is the error a control loop cannot reject. The
+    # integrator drives the *measured* attitude onto the command, which leaves
+    # the true attitude short by exactly the bias, and it stays there.
+    th_true = attitude(sol, sys.glider.fuselage.frame_a, 200.0).theta
+    @test 0.12 - th_true ≈ 0.00873 atol = 2e-4
+
+    # PHYSICS: noise reaches the elevator through the differenced rate term,
+    # amplified by sqrt(2)/Ts_ap -- 0.002*sqrt(2)/0.02*0.06 = 0.0085 rad
+    clean = build(:TestMotorGliderClimbDigital)
+    sol_c = solve(ODEProblem(clean, [], (0.0, 200.0)), reltol = 1e-9, abstol = 1e-9)
+    act(s, so) = std([so(t, idxs = s.ap.elevator) for t in (100.0:0.02:160.0) .+ 0.01])
+    @test act(clean, sol_c) < 1e-4                      # the clean loop is quiet
+    @test act(sys, sol) ≈ 0.002 * sqrt(2) / 0.02 * 0.06 rtol = 0.1
+
+    # PHYSICS: a sensor applies nothing to the frame it reads, noisy or not
+    @test all(abs(sol(5.0, idxs = sys.sensor.frame_a.f[i])) < 1e-12 for i in 1:3)
+    @test all(abs(sol(5.0, idxs = sys.sensor.frame_a.tau[i])) < 1e-12 for i in 1:3)
+end
+
+# ---------------------------------------------------------------------------
 @testset "DigitalAutopilot: sampled and held" begin
     sys = build(:TestMotorGliderClimbDigitalSlow)      # 1 Hz, so ticks are visible
     sol = sim(sys, 12.0; tol = 1e-9)
@@ -779,13 +854,13 @@ end
     @test sol(4.7, idxs = sys.ap.elevator) != sol(5.3, idxs = sys.ap.elevator)
 
     # PHYSICS: the held value is the control law evaluated at the tick
-    @test sol(5.4, idxs = sys.ap.elevator) ≈ sol(5.0, idxs = sys.ap.de) rtol = 1e-7
-    @test sol(5.4, idxs = sys.ap.aileron) ≈ sol(5.0, idxs = sys.ap.da) rtol = 1e-7
+    @test sol(5.4, idxs = sys.ap.elevator) ≈ sol(5.0, idxs = sys.ap.law.de) rtol = 1e-7
+    @test sol(5.4, idxs = sys.ap.aileron) ≈ sol(5.0, idxs = sys.ap.law.da) rtol = 1e-7
 
     # PHYSICS: the rate term is a backward difference of the samples, not a
     # derivative -- this is the defining difference from the continuous Pilot
-    @test sol(5.0, idxs = sys.ap.dtheta) ≈
-          (sol(5.0, idxs = sys.ap.theta_k) - sol(4.0, idxs = sys.ap.theta_k)) / Ts rtol = 1e-6
+    @test sol(5.0, idxs = sys.ap.law.dtheta) ≈
+          (sol(5.0, idxs = sys.ap.law.theta) - sol(4.0, idxs = sys.ap.law.theta)) / Ts rtol = 1e-6
 
     # PHYSICS: nothing in the controller enters the continuous state vector
     @test !any(occursin("ap", string(u)) for u in unknowns(sys))

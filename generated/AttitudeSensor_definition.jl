@@ -9,28 +9,13 @@
 
 Attitude and airspeed reference: the sensing half of an autopilot.
 
-This is the continuous part of a flight control system --- an attitude and
-heading reference unit with a pitot source. It reads the aircraft datum frame
-and the air mass and publishes pitch, bank and airspeed as ordinary signals.
+The ideal unit. It reports exactly what the frame and the air bus carry ---
+no bias, no noise, no quantisation, no lag, no sample rate. Use it when the
+question is about the airframe or the control law and sensor error would only
+get in the way.
 
-Splitting it out from the controller is not cosmetic. A digital autopilot is
-a signal processor: it cannot reach into a multibody frame, it reads whatever
-the sensors hand it. Keeping the frame algebra on this side leaves the
-controller a pure signal block, which is both how the hardware is arranged
-and what makes a sampled implementation possible at all.
-
-# Reading attitude from the frame
-
-Column 2 of `frame_a.R` is the world vertical resolved in body axes, which
-for the yaw-pitch-roll sequence of this frame convention is
-
-    [sin(theta), cos(theta)*cos(phi), -cos(theta)*sin(phi)]
-
-so pitch and bank come straight out of it. This is exact at any heading and
-singular only with the nose straight up.
-
-No sensor error is modelled --- no bias, no noise, no lag. Those belong here
-rather than in the controller when they are wanted.
+`NoisyAttitudeSensor` is the same instrument with the error terms present,
+and is a drop-in replacement for this one.
 
 ## Parameters:
 
@@ -42,14 +27,16 @@ rather than in the controller when they are wanted.
 
  * `frame_a` - Frame3D is the fundamental 3D connector used for 6DOF motion. Most components have one or several `Frame`
 connectors that can be connected together ([`Frame3D`](@ref))
- * `air` - Broadcast bus carrying the state of the air mass.
+ * `air` - Broadcast bus carrying the state of the air mass --- consuming end.
 
-All fields are `potential` and there is no `flow` field, so a single
-`connect` between an atmosphere component and any number of aerodynamic
-consumers simply equates the values: the bus is a pure one-to-many
-broadcast and adds no force or mass balance of its own.
+The counterpart to `AirStateOutput`; see that connector for why the bus is
+causal. Every component that reads the air carries one of these, and a
+component that merely passes the bus on to its own subcomponents --- as
+`Glider` and `Wing` do --- carries one of these too and fans it out. An
+input feeding further inputs is a plain broadcast and needs nothing special.
 
-The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
+A component that consumed the bus and re-emitted a modified one (a gust
+filter, a wind-shear block) would carry one of each. ([`AirStateInput`](@ref))
  * `theta` - This connector represents a real signal as an output from a component ([`RealOutput`](@ref))
  * `phi` - This connector represents a real signal as an output from a component ([`RealOutput`](@ref))
  * `V` - This connector represents a real signal as an output from a component ([`RealOutput`](@ref))
@@ -59,6 +46,9 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 | Name         | Description                         | Units  | 
 | ------------ | ----------------------------------- | ------ |
 | `v_rel_0`         | Velocity of the datum relative to the air mass, world frame                         | m/s  |
+| `theta_true`         | Pitch attitude as the frame actually holds it, before any sensor error                         | --  |
+| `phi_true`         | Bank angle as the frame actually holds it, before any sensor error                         | --  |
+| `V_true`         | True airspeed as the air bus actually gives it, before any sensor error                         | --  |
 """
 @component function AttitudeSensor(; name = nothing, v_eps=0.5, kwargs...)
   isnothing(name) && throw(ArgumentError("""
@@ -104,24 +94,39 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 
   ### Variables (declarations)
   append!(__vars, @variables (v_rel_0(t)[1:3]::Real), [description = "Velocity of the datum relative to the air mass, world frame"])
+  append!(__vars, @variables (theta_true(t)::Real), [description = "Pitch attitude as the frame actually holds it, before any sensor error"])
+  append!(__vars, @variables (phi_true(t)::Real), [description = "Bank angle as the frame actually holds it, before any sensor error"])
+  append!(__vars, @variables (V_true(t)::Real), [description = "True airspeed as the air bus actually gives it, before any sensor error"])
 
   ### Variables (assignments)
   __ovr_v_rel_0 = pop!(__overrides, "v_rel_0", nothing); isnothing(__ovr_v_rel_0) || push!(__eqs, v_rel_0 ~ __ovr_v_rel_0)
   __ovr_v_rel_0__initial = pop!(__overrides, "v_rel_0__initial", nothing); isnothing(__ovr_v_rel_0__initial) || (__initial_conditions[v_rel_0] = __ovr_v_rel_0__initial)
   __ovr_v_rel_0__guess = pop!(__overrides, "v_rel_0__guess", nothing)
+  __ovr_theta_true = pop!(__overrides, "theta_true", nothing); isnothing(__ovr_theta_true) || push!(__eqs, theta_true ~ __ovr_theta_true)
+  __ovr_theta_true__initial = pop!(__overrides, "theta_true__initial", nothing); isnothing(__ovr_theta_true__initial) || (__initial_conditions[theta_true] = __ovr_theta_true__initial)
+  __ovr_theta_true__guess = pop!(__overrides, "theta_true__guess", nothing)
+  __ovr_phi_true = pop!(__overrides, "phi_true", nothing); isnothing(__ovr_phi_true) || push!(__eqs, phi_true ~ __ovr_phi_true)
+  __ovr_phi_true__initial = pop!(__overrides, "phi_true__initial", nothing); isnothing(__ovr_phi_true__initial) || (__initial_conditions[phi_true] = __ovr_phi_true__initial)
+  __ovr_phi_true__guess = pop!(__overrides, "phi_true__guess", nothing)
+  __ovr_V_true = pop!(__overrides, "V_true", nothing); isnothing(__ovr_V_true) || push!(__eqs, V_true ~ __ovr_V_true)
+  __ovr_V_true__initial = pop!(__overrides, "V_true__initial", nothing); isnothing(__ovr_V_true__initial) || (__initial_conditions[V_true] = __ovr_V_true__initial)
+  __ovr_V_true__guess = pop!(__overrides, "V_true__guess", nothing)
 
   ### Constants
   __constants = Any[]
 
   ### Components
   push!(__systems, @named frame_a = __Dyad__Frame3D())
-  push!(__systems, @named air = Multtest.AirState())
+  push!(__systems, @named air = Multtest.AirStateInput())
 
   ### Check there are no unmatched overrides
   isempty(__overrides) || throw(ArgumentError("overrides: [$(join(keys(__overrides), ", "))] don't match names found in model. These names may exist in the model but could have been conditionally excluded."))
 
   ### Guesses
   isnothing(__ovr_v_rel_0__guess) || (__guesses[v_rel_0] = __ovr_v_rel_0__guess)
+  isnothing(__ovr_theta_true__guess) || (__guesses[theta_true] = __ovr_theta_true__guess)
+  isnothing(__ovr_phi_true__guess) || (__guesses[phi_true] = __ovr_phi_true__guess)
+  isnothing(__ovr_V_true__guess) || (__guesses[V_true] = __ovr_V_true__guess)
 
   ### Initialization Equations
 
@@ -132,9 +137,12 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
   push!(__eqs, frame_a.f ~ [0, 0, 0])
   push!(__eqs, frame_a.tau ~ [0, 0, 0])
   push!(__eqs, v_rel_0 ~ ModelingToolkit.D_nounits(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z])
-  push!(__eqs, V ~ sqrt(v_rel_0[1] ^ 2 + v_rel_0[2] ^ 2 + v_rel_0[3] ^ 2 + v_eps ^ 2))
-  push!(__eqs, theta ~ atan(getindex(getproperty(frame_a, :R), 1, 2), sqrt(getindex(getproperty(frame_a, :R), 2, 2) ^ 2 + getindex(getproperty(frame_a, :R), 3, 2) ^ 2)))
-  push!(__eqs, phi ~ atan(-getindex(getproperty(frame_a, :R), 3, 2), getindex(getproperty(frame_a, :R), 2, 2)))
+  push!(__eqs, V_true ~ sqrt(v_rel_0[1] ^ 2 + v_rel_0[2] ^ 2 + v_rel_0[3] ^ 2 + v_eps ^ 2))
+  push!(__eqs, theta_true ~ atan(getindex(getproperty(frame_a, :R), 1, 2), sqrt(getindex(getproperty(frame_a, :R), 2, 2) ^ 2 + getindex(getproperty(frame_a, :R), 3, 2) ^ 2)))
+  push!(__eqs, phi_true ~ atan(-getindex(getproperty(frame_a, :R), 3, 2), getindex(getproperty(frame_a, :R), 2, 2)))
+  push!(__eqs, theta ~ theta_true)
+  push!(__eqs, phi ~ phi_true)
+  push!(__eqs, V ~ V_true)
 
   # Return completely constructed System
   return System(__eqs, t, __vars, __params; systems=__systems, initial_conditions=__initial_conditions, guesses=__guesses, name, initialization_eqs=__initialization_eqs, bindings=__bindings, assertions=__assertions)

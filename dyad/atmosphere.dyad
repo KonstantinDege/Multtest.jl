@@ -1,9 +1,10 @@
 """
-Supplier for the `AirState` bus: density and wind for the whole aircraft.
+Supplier for the air-state bus: density and wind for the whole aircraft.
 
 One instance feeds every aerodynamic element through a single `connect`,
-because `AirState` carries no flow variable and is therefore a pure
-broadcast.
+because the bus carries no flow variable and is therefore a pure broadcast.
+This component holds the bus's only `AirStateOutput`; everything else on
+the bus carries an `AirStateInput`.
 
 # Density
 
@@ -33,8 +34,8 @@ a thermal) is not represented: that needs a per-panel field query rather
 than a uniform bus.
 """
 component Atmosphere
-  "Air state supplied to every aerodynamic element"
-  air = AirState() {^air}
+  "Air state supplied to every aerodynamic element; this is the bus's one source"
+  air = AirStateOutput() {^air}
   "Geometric altitude, world y"
   altitude = RealInput() if isa_density {^altitude}
   "Commanded wind velocity, world frame, x component"

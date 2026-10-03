@@ -1,22 +1,83 @@
 """
-Broadcast bus carrying the state of the air mass.
+Broadcast bus carrying the state of the air mass --- producing end.
 
-All fields are `potential` and there is no `flow` field, so a single
-`connect` between an atmosphere component and any number of aerodynamic
-consumers simply equates the values: the bus is a pure one-to-many
-broadcast and adds no force or mass balance of its own.
+The bus is a pure one-to-many broadcast: a single `connect` from an
+atmosphere to any number of aerodynamic consumers equates the values and
+adds no force or mass balance of its own. The wind velocity is resolved in
+the **world** frame.
 
-The wind velocity is resolved in the **world** frame.
+# Why the bus is causal
+
+The fields are `output` here and `input` on `AirStateInput`, rather than
+`potential` on one shared connector. Two reasons:
+
+1. **It is what the bus actually is.** Air state flows one way. An
+   atmosphere produces it; a panel, a propeller, a drag body or a pitot
+   consumes it. Nothing downstream can push back on the air, because the
+   bus carries no conjugate flow and therefore no power. A `potential`
+   field asserts an equality with no direction, which is weaker than the
+   truth, and it leaves a reader of the diagram no way to see which end of
+   a link is the source.
+2. **It silences a spurious ModelingToolkit warning.** The connector lint
+   in `ModelingToolkitBase` warns when a connector's flow and non-flow
+   variable counts differ, on the assumption that every potential has a
+   conjugate flow. A broadcast bus has none, so four potentials and zero
+   flows tripped it on every instantiation --- fourteen warnings per
+   harness build. Variables marked `input` or `output` are not counted, so
+   a causal bus satisfies the lint honestly rather than by suppressing it.
+   (`Frame3D` fails the same lint and is exempted by an `IsFrame` metadata
+   flag that only the built-in connector carries; it is not reusable here,
+   because the connection code then expects frame orientation metadata.)
+
+What the split does **not** buy, despite the obvious guess: it does not
+catch wiring two atmospheres onto one bus any earlier. That was measured ---
+two `AirStateOutput`s in one connection set and two `potential` connectors
+in one connection set both fail identically, as an unbalanced system with
+more equations than unknowns, and neither reports it as a causality
+conflict. The causality here is documentation and lint-compliance, not a
+new check.
+
+The generated equations are unchanged by the split: same unknowns, same
+equation count, same trajectories.
 """
-connector AirState
+connector AirStateOutput
   "Air density"
-  potential rho::Density
+  output rho::Density
   "Wind velocity, world frame, x component (world x is forward)"
-  potential v_wind_x::Velocity
+  output v_wind_x::Velocity
   "Wind velocity, world frame, y component (world y is up)"
-  potential v_wind_y::Velocity
+  output v_wind_y::Velocity
   "Wind velocity, world frame, z component (world z is to the right)"
-  potential v_wind_z::Velocity
+  output v_wind_z::Velocity
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/AirState.svg"},
+    "path": {"stroke": "rgb(47,159,208)"}
+  }
+}
+end
+
+"""
+Broadcast bus carrying the state of the air mass --- consuming end.
+
+The counterpart to `AirStateOutput`; see that connector for why the bus is
+causal. Every component that reads the air carries one of these, and a
+component that merely passes the bus on to its own subcomponents --- as
+`Glider` and `Wing` do --- carries one of these too and fans it out. An
+input feeding further inputs is a plain broadcast and needs nothing special.
+
+A component that consumed the bus and re-emitted a modified one (a gust
+filter, a wind-shear block) would carry one of each.
+"""
+connector AirStateInput
+  "Air density"
+  input rho::Density
+  "Wind velocity, world frame, x component (world x is forward)"
+  input v_wind_x::Velocity
+  "Wind velocity, world frame, y component (world y is up)"
+  input v_wind_y::Velocity
+  "Wind velocity, world frame, z component (world z is to the right)"
+  input v_wind_z::Velocity
 metadata {
   "Dyad": {
     "icons": {"default": "dyad://Multtest/AirState.svg"},
@@ -107,7 +168,7 @@ component AeroSurface
   "Mount at the panel's aerodynamic centre; +x chordwise forward, +y lift, +z spanwise"
   frame_a = Frame3D() {^frame_a}
   "Density and wind at the panel"
-  air = AirState() {^air}
+  air = AirStateInput() {^air}
   "Control surface deflection, positive trailing edge down"
   delta = RealInput() if has_control {^delta}
   "Downwash velocity at the panel, positive downward, in the panel frame"
@@ -285,7 +346,7 @@ component Downwash
   "Sensor frame, used only for the flight speed; exerts no force"
   frame_a = Frame3D() {^frame_a}
   "Density and wind"
-  air = AirState() {^air}
+  air = AirStateInput() {^air}
   "Lift of the upstream surface"
   L_up = RealInput() {^L_up}
   "Downwash velocity at the downstream surface, positive downward"

@@ -16,6 +16,7 @@ if isfile(joinpath((@__DIR__) |> Base.dirname, "dyad", "definitions.jl"))
 end
 
 import BlockComponents
+import DiscreteComponents
 import DyadData
 import DyadInterface
 import ElectricalComponents
@@ -203,15 +204,19 @@ end
 
 
 include("AeroSurface_definition.jl")
-include("AirState_definition.jl")
+include("AirStateInput_definition.jl")
+include("AirStateOutput_definition.jl")
 include("Atmosphere_definition.jl")
 include("AttitudeSensor_definition.jl")
+include("AutopilotLaw_definition.jl")
 include("DigitalAutopilot_definition.jl")
 include("Downwash_definition.jl")
 include("DragBody_definition.jl")
 include("Glider_definition.jl")
 include("GroundContact_definition.jl")
 include("MotorGlider_definition.jl")
+include("NoisyAttitudeSensor_definition.jl")
+include("NoisyChannel_definition.jl")
 include("Pilot_definition.jl")
 include("Propeller_definition.jl")
 include("TestAeroSpeedRamp_definition.jl")
@@ -225,6 +230,7 @@ include("TestGliderNoFin_definition.jl")
 include("TestGliderWingOnly_definition.jl")
 include("TestGlider_definition.jl")
 include("TestGroundContactDrop_definition.jl")
+include("TestMotorGliderClimbDigitalNoisy_definition.jl")
 include("TestMotorGliderClimbDigitalSlow_definition.jl")
 include("TestMotorGliderClimbDigital_definition.jl")
 include("TestMotorGliderClimb_definition.jl")

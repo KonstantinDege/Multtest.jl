@@ -28,8 +28,8 @@ mass, which is where `Body` expects them; the parallel axis shift to the
 datum is done by `Body` from `r_cm`.
 """
 component Glider
-  "Density and wind"
-  air = AirState() {^air}
+  "Density and wind, fanned out to every aerodynamic element"
+  air = AirStateInput() {^air}
   "Elevator deflection, positive trailing edge down, which pitches the nose down"
   elevator = RealInput() if has_htail {^elevator}
   "Rudder deflection, positive trailing edge to the right, which yaws the nose left"

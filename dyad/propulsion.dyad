@@ -55,7 +55,7 @@ component Propeller
   "Mount; thrust acts along the +x axis of this frame"
   frame_a = Frame3D() {^frame_a}
   "Density and wind"
-  air = AirState() {^air}
+  air = AirStateInput() {^air}
   "Throttle, 0 is engine off and 1 is full power"
   throttle = RealInput() {^throttle}
 

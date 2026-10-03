@@ -75,14 +75,16 @@ sideslip angle and its lift becomes a side force.
 
  * `frame_a` - Frame3D is the fundamental 3D connector used for 6DOF motion. Most components have one or several `Frame`
 connectors that can be connected together ([`Frame3D`](@ref))
- * `air` - Broadcast bus carrying the state of the air mass.
+ * `air` - Broadcast bus carrying the state of the air mass --- consuming end.
 
-All fields are `potential` and there is no `flow` field, so a single
-`connect` between an atmosphere component and any number of aerodynamic
-consumers simply equates the values: the bus is a pure one-to-many
-broadcast and adds no force or mass balance of its own.
+The counterpart to `AirStateOutput`; see that connector for why the bus is
+causal. Every component that reads the air carries one of these, and a
+component that merely passes the bus on to its own subcomponents --- as
+`Glider` and `Wing` do --- carries one of these too and fans it out. An
+input feeding further inputs is a plain broadcast and needs nothing special.
 
-The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
+A component that consumed the bus and re-emitted a modified one (a gust
+filter, a wind-shear block) would carry one of each. ([`AirStateInput`](@ref))
  * `delta_l` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `delta_r` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `w_induced` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
@@ -216,7 +218,7 @@ The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
 
   ### Components
   push!(__systems, @named frame_a = __Dyad__Frame3D())
-  push!(__systems, @named air = Multtest.AirState())
+  push!(__systems, @named air = Multtest.AirStateInput())
   # Subcomponent root of type MultibodyComponents.FixedTranslation
   root_overrides = __pop_subcomponent_overrides!(__overrides, "root")
   push!(__systems, @named root = MultibodyComponents.FixedTranslation(; r=[x_ac, y_ac, Float64(0.0)], render=false, root_overrides...))

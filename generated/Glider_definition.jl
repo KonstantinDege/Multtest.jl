@@ -114,14 +114,16 @@ datum is done by `Body` from `r_cm`.
 
 ## Connectors
 
- * `air` - Broadcast bus carrying the state of the air mass.
+ * `air` - Broadcast bus carrying the state of the air mass --- consuming end.
 
-All fields are `potential` and there is no `flow` field, so a single
-`connect` between an atmosphere component and any number of aerodynamic
-consumers simply equates the values: the bus is a pure one-to-many
-broadcast and adds no force or mass balance of its own.
+The counterpart to `AirStateOutput`; see that connector for why the bus is
+causal. Every component that reads the air carries one of these, and a
+component that merely passes the bus on to its own subcomponents --- as
+`Glider` and `Wing` do --- carries one of these too and fans it out. An
+input feeding further inputs is a plain broadcast and needs nothing special.
 
-The wind velocity is resolved in the **world** frame. ([`AirState`](@ref))
+A component that consumed the bus and re-emitted a modified one (a gust
+filter, a wind-shear block) would carry one of each. ([`AirStateInput`](@ref))
  * `elevator` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `rudder` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
  * `aileron` - This connector represents a real signal as an input to a component ([`RealInput`](@ref))
@@ -467,7 +469,7 @@ connectors that can be connected together ([`Frame3D`](@ref))
   __constants = Any[]
 
   ### Components
-  push!(__systems, @named air = Multtest.AirState())
+  push!(__systems, @named air = Multtest.AirStateInput())
   push!(__systems, @named frame_datum = __Dyad__Frame3D())
   # Subcomponent fuselage of type MultibodyComponents.Body
   fuselage_overrides = __pop_subcomponent_overrides!(__overrides, "fuselage")

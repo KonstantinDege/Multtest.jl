@@ -1,15 +1,17 @@
 """
-Attitude and airspeed reference: the sensing half of an autopilot.
+The frame algebra shared by every attitude and airspeed reference.
 
-This is the continuous part of a flight control system --- an attitude and
-heading reference unit with a pitot source. It reads the aircraft datum frame
-and the air mass and publishes pitch, bank and airspeed as ordinary signals.
+This holds the part of a sensor that is physics rather than instrumentation:
+reading the aircraft datum frame and the air mass, and reducing them to pitch,
+bank and true airspeed. What a particular unit then does with those three
+numbers --- report them exactly, or sample, bias, quantise and corrupt them
+--- is left to the component that extends this one.
 
-Splitting it out from the controller is not cosmetic. A digital autopilot is
-a signal processor: it cannot reach into a multibody frame, it reads whatever
-the sensors hand it. Keeping the frame algebra on this side leaves the
-controller a pure signal block, which is both how the hardware is arranged
-and what makes a sampled implementation possible at all.
+Splitting the sensing out from the controller is not cosmetic. A digital
+autopilot is a signal processor: it cannot reach into a multibody frame, it
+reads whatever the sensors hand it. Keeping the frame algebra on this side
+leaves the controller a pure signal block, which is both how the hardware is
+arranged and what makes a sampled implementation possible at all.
 
 # Reading attitude from the frame
 
@@ -20,54 +22,453 @@ for the yaw-pitch-roll sequence of this frame convention is
 
 so pitch and bank come straight out of it. This is exact at any heading and
 singular only with the nose straight up.
-
-No sensor error is modelled --- no bias, no noise, no lag. Those belong here
-rather than in the controller when they are wanted.
 """
-component AttitudeSensor
+partial component AttitudeSensorBase
   "Mount on the aircraft datum"
   frame_a = Frame3D() {^frame_a}
   "Density and wind, so the airspeed is true airspeed and not ground speed"
-  air = AirState() {^air}
-  "Pitch attitude, positive nose up"
+  air = AirStateInput() {^air}
+  "Reported pitch attitude, positive nose up"
   theta = RealOutput() {^theta}
-  "Bank angle, positive right wing down"
+  "Reported bank angle, positive right wing down"
   phi = RealOutput() {^phi}
-  "Airspeed"
+  "Reported airspeed"
   V = RealOutput() {^V}
-
   "Airspeed regularisation, so the speed stays differentiable at rest"
   parameter v_eps::Velocity = 0.5
-
   "Velocity of the datum relative to the air mass, world frame"
   variable v_rel_0::Velocity[3]
+  "Pitch attitude as the frame actually holds it, before any sensor error"
+  variable theta_true::Real
+  "Bank angle as the frame actually holds it, before any sensor error"
+  variable phi_true::Real
+  "True airspeed as the air bus actually gives it, before any sensor error"
+  variable V_true::Real
 relations
   # A sensor applies nothing to the frame it reads
   frame_a.f = [0, 0, 0]
   frame_a.tau = [0, 0, 0]
-
   v_rel_0 = der(frame_a.r_0) - [air.v_wind_x, air.v_wind_y, air.v_wind_z]
-  V = sqrt(v_rel_0[1]^2 + v_rel_0[2]^2 + v_rel_0[3]^2 + v_eps^2)
-  theta = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2]^2 + frame_a.R[3, 2]^2))
-  phi = atan(-frame_a.R[3, 2], frame_a.R[2, 2])
+  V_true = sqrt(v_rel_0[1] ^ 2 + v_rel_0[2] ^ 2 + v_rel_0[3] ^ 2 + v_eps ^ 2)
+  theta_true = atan(frame_a.R[1, 2], sqrt(frame_a.R[2, 2] ^ 2 + frame_a.R[3, 2] ^ 2))
+  phi_true = atan(-frame_a.R[3, 2], frame_a.R[2, 2])
 metadata {
-  "Dyad": {"icons": {"default": "dyad://Multtest/AttitudeSensor.svg"}},
   "_links": {
-    "frame_a": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 300, "x2": 50, "y2": 400}}}
+    "frame_a": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 300, "x2": 50, "y2": 400}}}},
+    "air": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 600, "x2": 50, "y2": 700}}}},
+    "theta": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 200, "x2": 1050, "y2": 300}}}},
+    "phi": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}},
+    "V": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 700, "x2": 1050, "y2": 800}}}}
+  }
+}
+end
+
+"""
+Attitude and airspeed reference: the sensing half of an autopilot.
+
+The ideal unit. It reports exactly what the frame and the air bus carry ---
+no bias, no noise, no quantisation, no lag, no sample rate. Use it when the
+question is about the airframe or the control law and sensor error would only
+get in the way.
+
+`NoisyAttitudeSensor` is the same instrument with the error terms present,
+and is a drop-in replacement for this one.
+"""
+component AttitudeSensor
+  extends AttitudeSensorBase
+relations
+  theta = theta_true
+  phi = phi_true
+  V = V_true
+metadata {"Dyad": {"icons": {"default": "dyad://Multtest/AttitudeSensor.svg"}}}
+end
+
+"""
+One measurement channel of an instrument: sample, bias, noise, quantise.
+
+This is a local replacement for `DiscreteComponents.SampleWithADEffects`,
+which does the same four things in the same order. It exists because the
+stock block gives no way to make two channels independent, and two channels
+of one instrument that share a common-mode error are not a noise model ---
+they are a disturbance, and a fusion or multi-axis loop will treat them as
+one.
+
+# Why a seed is not enough
+
+The library's noise source computes `seeded_randn(seed, t)`, which builds a
+`StableRNG` from `hash(t, hash(seed))` and takes a single draw. A single draw
+from a freshly seeded linear generator is close to a linear function of its
+state, so two channels evaluated at the *same* `t` with different seeds come
+out correlated --- measurably, not theoretically. Over a 40 s run at 100 Hz:
+
+    seeds (1,2,3)                 worst pairwise |corr| = 0.56
+    seeds (1,97,199)              worst pairwise |corr| = 0.50
+    best triple searched in 1:400 worst pairwise |corr| = 0.17
+    fraction of all pairs in 1:400 with |corr| > 0.05:  0.92
+
+against a sampling floor of 0.016. There is no seed choice that fixes it.
+
+# What does work
+
+Hold the seed and move the *time* the generator is keyed on. Distinct `t`
+values hash to unrelated states, and the correlation drops to the sampling
+floor (measured 0.016 to 0.033 across sample rates of 5, 10 and 20 ms). So
+each channel takes one `seed` --- the seed of the whole instrument, which is
+what makes a run reproducible --- and its own `t_offset`.
+
+`t_offset` must be distinct per channel and incommensurate with the sample
+period: an offset that is an exact multiple of `Ts` just shifts one channel
+onto another channel's samples, which is perfect correlation at a lag rather
+than independence. Irrational-looking constants are the simple way to be
+sure.
+
+# Order of operations
+
+Sample, then bias and noise, then quantise --- the order the hardware
+imposes, since an ADC quantises whatever analogue signal reaches it, errors
+included. Quantising last is what puts the output exactly on the quantiser
+grid, which is a property worth keeping if anything downstream is counting
+levels.
+"""
+component NoisyChannel@[input clk extends Discrete]
+  "The continuous quantity being measured"
+  u = RealInput() {^u}
+  "The reading, on the clock"
+  y = RealOutput@[clk]() {^y}
+  "Samples the measured quantity onto the clock"
+  s_u = DiscreteComponents.Sampler() {^s_u}
+  "Simulation time, which is what the noise is keyed on"
+  t_src = BlockComponents.Sources.ContinuousClock() {^t_src}
+  "Samples time onto the same clock"
+  s_t = DiscreteComponents.Sampler() {^s_t}
+  "Clips to full scale and quantises, as an ADC does"
+  q = DiscreteComponents.Quantization(bits = bits, quantized = quantized, y_min = y_min, y_max = y_max) {^q}
+  "Standing offset of this channel"
+  parameter bias::Real = 0.0
+  "Noise standard deviation of this channel"
+  parameter sigma::Real = 0.0
+  "RNG seed; shared with the rest of the instrument"
+  parameter seed::Integer = 1
+  "Time offset that makes this channel independent of its neighbours"
+  parameter t_offset::Real = 0.0
+  "Bottom of full scale; the quantiser clips here"
+  parameter y_min::Real = -1.0
+  "Top of full scale; the quantiser clips here"
+  parameter y_max::Real = 1.0
+  "Quantiser word length"
+  parameter bits::Integer = 16
+  "Whether the reading is quantised at all"
+  parameter quantized::Boolean = true
+  "Sampled simulation time"
+  variable td::Real
+relations
+  td@clk = s_t.y@clk
+  q.u@clk = s_u.y@clk + bias + sigma * DiscreteComponents.seeded_randn(seed, td + t_offset)
+  connect(u, s_u.u) {^id7}
+  connect(t_src.y, s_t.u) {^id8}
+  connect(q.y, y) {^id9}
+metadata {
+  "_links": {
+    "u": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}},
+    "y": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}},
+    "s_u": {
+      "Dyad": {"placement": {"diagram": {"x1": 200, "y1": 420, "x2": 300, "y2": 520}}}
     },
-    "air": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 600, "x2": 50, "y2": 700}}}
+    "t_src": {
+      "Dyad": {"placement": {"diagram": {"x1": 40, "y1": 760, "x2": 140, "y2": 860}}}
     },
-    "theta": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 200, "x2": 1050, "y2": 300}}}
+    "s_t": {
+      "Dyad": {"placement": {"diagram": {"x1": 200, "y1": 760, "x2": 300, "y2": 860}}}
     },
-    "phi": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 450, "x2": 1050, "y2": 550}}}
+    "q": {
+      "Dyad": {"placement": {"diagram": {"x1": 620, "y1": 420, "x2": 720, "y2": 520}}}
     },
-    "V": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 700, "x2": 1050, "y2": 800}}}
-    }
+    "id7": {},
+    "id8": {},
+    "id9": {}
+  }
+}
+end
+
+"""
+The same attitude and airspeed reference with the instrument errors modelled.
+
+A drop-in replacement for `AttitudeSensor`: same ports, same frame algebra,
+and still a continuous-signal interface, so a harness swaps one for the other
+and changes nothing else. What it adds is everything between the physical
+quantity and the number the flight computer reads:
+
+* **A sample rate of its own.** The unit runs on its own `PeriodicClock` at
+  `Ts`, independent of the autopilot's clock. This is how the hardware is
+  arranged --- an AHRS and a flight computer are separate boxes on separate
+  oscillators --- and it means the autopilot sees a signal that is already
+  held, so any aliasing between the two rates is in the model rather than
+  assumed away.
+* **A fixed bias per channel.** A standing offset is the error that a control
+  loop cannot reject, because the integrator trims the aircraft to the wrong
+  attitude rather than trimming the error away. `bias_theta` is the one to
+  reach for when the question is how much a mis-levelled unit costs.
+* **Gaussian noise per channel**, drawn so that the three channels really are
+  independent --- see `NoisyChannel`, which explains why that takes more than
+  giving each channel its own seed. One `seed` makes the whole run
+  reproducible.
+* **Quantisation**, over a declared full-scale range. This is the error that
+  does not shrink when the aircraft flies more smoothly, and the one that
+  sets the floor on a rate term computed by differencing.
+
+# Choosing the ranges
+
+The quantiser clips at `y_min`/`y_max`, so the ranges are full-scale limits
+and not a formality: pitch beyond `theta_range` reads as `theta_range`. The
+defaults cover an aircraft that is the right way up and inside its envelope
+(+/- 90 deg pitch, +/- 180 deg bank, 0 to 80 m/s) at 16 bits, which puts the
+quantisation step at about 5e-5 rad and 1.2e-3 m/s --- an order below the
+default noise, so noise dominates, as it does in a decent unit. Dropping
+`bits` is how to make quantisation the dominant error instead.
+
+# Note on the rate terms downstream
+
+`DigitalAutopilot` forms its rate terms by differencing successive samples,
+so measurement noise of standard deviation `sigma` reaches the rate term
+multiplied by `sqrt(2)/Ts_autopilot`. At the defaults that is a rate noise of
+about 0.14 rad/s rms on a gain of 0.06, or 0.009 rad of elevator --- small,
+but it is the term that will bite first if the noise is raised.
+"""
+component NoisyAttitudeSensor
+  extends AttitudeSensorBase
+  "Pins the unit's sample rate"
+  clock = DiscreteComponents.PeriodicClock(dt = Ts) {^clock}
+  # The three channels never meet in an equation, so they reach the compiler
+  # as three separate clock partitions, and a clock source pins only the
+  # partition its own signal is in --- the other two arrive as unresolved
+  # `InferredDiscrete` and the build fails. A second and third `PeriodicClock`
+  # is not the fix: two clock sources in one component body is an
+  # `invalid-clock-usage` error. `ClockPropagator` is the block for this. It
+  # ties two signals' clocks without tying their values, which is exactly the
+  # statement that all three channels run off the one oscillator.
+  "Ties the bank channel to the pitch channel's clock"
+  tie_phi = DiscreteComponents.ClockPropagator() {^tie_phi}
+  "Ties the airspeed channel to the pitch channel's clock"
+  tie_V = DiscreteComponents.ClockPropagator() {^tie_V}
+  "Sample, bias, add noise, quantise --- pitch"
+  ch_theta = NoisyChannel(bias = bias_theta, sigma = sigma_theta, seed = seed, t_offset = t_offset_theta, bits = bits, quantized = quantized, y_min = -theta_range, y_max = theta_range) {^ch_theta}
+  "Sample, bias, add noise, quantise --- bank"
+  ch_phi = NoisyChannel(bias = bias_phi, sigma = sigma_phi, seed = seed, t_offset = t_offset_phi, bits = bits, quantized = quantized, y_min = -phi_range, y_max = phi_range) {^ch_phi}
+  "Sample, bias, add noise, quantise --- airspeed"
+  ch_V = NoisyChannel(bias = bias_V, sigma = sigma_V, seed = seed, t_offset = t_offset_V, bits = bits, quantized = quantized, y_min = 0.0, y_max = V_range) {^ch_V}
+  "Hold back to continuous time, so the unit is a drop-in for the ideal one"
+  h_theta = DiscreteComponents.ZeroOrderHold() {^h_theta}
+  h_phi = DiscreteComponents.ZeroOrderHold() {^h_phi}
+  h_V = DiscreteComponents.ZeroOrderHold() {^h_V}
+  "Sample period of the unit; the clock is built with the component, so this is structural"
+  structural parameter Ts::Real = 0.01
+  "Standing pitch offset, the error an attitude loop cannot reject"
+  parameter bias_theta::Angle = 0.0
+  "Standing bank offset"
+  parameter bias_phi::Angle = 0.0
+  "Standing airspeed offset, e.g. a static source error"
+  parameter bias_V::Velocity = 0.0
+  "Pitch noise, standard deviation"
+  parameter sigma_theta::Angle = 0.002
+  "Bank noise, standard deviation"
+  parameter sigma_phi::Angle = 0.002
+  "Airspeed noise, standard deviation"
+  parameter sigma_V::Velocity = 0.3
+  "Pitch full scale; the quantiser clips here"
+  parameter theta_range::Angle = 1.5708
+  "Bank full scale; the quantiser clips here"
+  parameter phi_range::Angle = 3.1416
+  "Airspeed full scale; the quantiser clips here"
+  parameter V_range::Velocity = 80.0
+  "Whether the reported values are quantised at all"
+  parameter quantized::Boolean = true
+  "Quantiser word length, all three channels"
+  parameter bits::Integer = 16
+  "RNG seed for the whole unit; the same seed replays the same run exactly"
+  parameter seed::Integer = 1
+  """
+  Time offsets that decorrelate the three channels. They must stay distinct
+  and incommensurate with `Ts`; `NoisyChannel` explains why the decorrelation
+  is done this way rather than with three seeds.
+  """
+  parameter t_offset_theta::Real = 0.0
+  parameter t_offset_phi::Real = 0.57721566
+  parameter t_offset_V::Real = 2.71828183
+relations
+  ch_theta.u = theta_true
+  ch_phi.u = phi_true
+  ch_V.u = V_true
+  connect(ch_theta.y, h_theta.u, clock.y, tie_phi.u, tie_V.u) {^id10}
+  connect(ch_phi.y, h_phi.u, tie_phi.y) {^id11}
+  connect(ch_V.y, h_V.u, tie_V.y) {^id12}
+  connect(h_theta.y, theta) {^id13}
+  connect(h_phi.y, phi) {^id14}
+  connect(h_V.y, V) {^id15}
+metadata {
+  "Dyad": {
+    "icons": {"default": "dyad://Multtest/AttitudeSensor.svg"},
+    "labels": [
+      {"label": "$(instance)", "x": 500, "y": 1100, "rot": 0},
+      {
+        "label": "Ts = $(Ts)",
+        "x": 500,
+        "y": 1230,
+        "rot": 0,
+        "attrs": {"font-size": "90", "fill": "#6b7a88"}
+      }
+    ]
+  },
+  "_links": {
+    "clock": {
+      "Dyad": {"placement": {"diagram": {"x1": 440, "y1": 20, "x2": 540, "y2": 120}}}
+    },
+    "tie_phi": {
+      "Dyad": {"placement": {"diagram": {"x1": 880, "y1": 280, "x2": 980, "y2": 380}}}
+    },
+    "tie_V": {
+      "Dyad": {"placement": {"diagram": {"x1": 880, "y1": 580, "x2": 980, "y2": 680}}}
+    },
+    "ch_theta": {
+      "Dyad": {"placement": {"diagram": {"x1": 300, "y1": 120, "x2": 400, "y2": 220}}}
+    },
+    "ch_phi": {
+      "Dyad": {"placement": {"diagram": {"x1": 300, "y1": 420, "x2": 400, "y2": 520}}}
+    },
+    "ch_V": {
+      "Dyad": {"placement": {"diagram": {"x1": 300, "y1": 720, "x2": 400, "y2": 820}}}
+    },
+    "h_theta": {
+      "Dyad": {"placement": {"diagram": {"x1": 620, "y1": 120, "x2": 720, "y2": 220}}}
+    },
+    "h_phi": {
+      "Dyad": {"placement": {"diagram": {"x1": 620, "y1": 420, "x2": 720, "y2": 520}}}
+    },
+    "h_V": {
+      "Dyad": {"placement": {"diagram": {"x1": 620, "y1": 720, "x2": 720, "y2": 820}}}
+    },
+    "id10": {},
+    "id11": {},
+    "id12": {},
+    "id13": {},
+    "id14": {},
+    "id15": {}
+  }
+}
+end
+
+"""
+The clocked half of `DigitalAutopilot`: the control law itself, on a clock.
+
+Every relation here lives on the clock parameter `clk`, and every signal on
+the interface is a clocked signal. There is no sampler and no hold in this
+component --- it is the flight computer's arithmetic and nothing else, which
+is what makes it testable on its own against a bare clock.
+
+# What a sampled law changes
+
+* **The rate terms are backward differences of the sampled attitude**,
+  `(theta_k - theta_k-1)/Ts`, not `der(theta)`. A digital controller cannot
+  differentiate a continuous signal; it differences successive samples.
+* **The integral is an explicit Euler sum**, `xi_k = xi_k-1 + Ts*e_k`, and
+  the anti-windup factor reads the *previous* output, because a causal
+  discrete loop cannot use the output it is in the middle of computing.
+
+The anti-windup factor `1 - (de_k-1/delta_max)^2` is the local gain of the
+`tanh` saturation, so the integrator gives up exactly as fast as the control
+runs out of authority.
+
+# Sample period
+
+`Ts` appears explicitly in the difference and the sum, so it must agree with
+the clock that `clk` resolves to. `DigitalAutopilot` passes its own `Ts` to
+both this component and the `PeriodicClock`, which is what keeps them in
+step; a direct user of this component has to do the same.
+"""
+component AutopilotLaw@[input clk extends Discrete]
+  "Sampled pitch attitude"
+  theta = RealInput@[clk]() {^theta}
+  "Sampled bank angle"
+  phi = RealInput@[clk]() {^phi}
+  "Sampled airspeed"
+  V = RealInput@[clk]() {^V}
+  "Elevator command at the tick, positive trailing edge down"
+  elevator = RealOutput@[clk]() {^elevator}
+  "Aileron command at the tick, positive rolls right"
+  aileron = RealOutput@[clk]() {^aileron}
+  "Sample period; must match the clock bound to `clk`"
+  parameter Ts::Real = 0.02
+  "Pitch attitude held below the rotation speed"
+  parameter theta_ground::Angle = 0.0
+  "Pitch attitude held above the rotation speed"
+  parameter theta_climb::Angle = 0.12
+  "Airspeed at which the aircraft is rotated"
+  parameter V_rotate::Velocity = 22.0
+  "Width of the blend between the two commanded attitudes"
+  parameter V_blend::Velocity = 1.5
+  "Bank angle held throughout, positive right wing down"
+  parameter phi_cmd::Angle = 0.0
+  "Elevator per radian of pitch error"
+  parameter k_theta::Real = 0.25
+  "Elevator per radian per second of pitch rate"
+  parameter kd_theta::Real = 0.06
+  "Aileron per radian of bank error"
+  parameter k_phi::Real = 0.35
+  "Aileron per radian per second of roll rate"
+  parameter kd_phi::Real = 0.05
+  "Time over which a standing attitude error is trimmed away, both axes"
+  parameter T_i::Real = 4.0
+  "Control deflection limit, both axes"
+  parameter delta_max::Angle = 0.35
+  "Commanded pitch attitude"
+  variable theta_cmd::Real
+  "Pitch error at the tick"
+  variable e_theta::Real
+  "Bank error at the tick"
+  variable e_phi::Real
+  "Pitch rate, backward difference of samples"
+  variable dtheta::Real
+  "Roll rate, backward difference of samples"
+  variable dphi::Real
+  "Accumulated pitch error"
+  variable xi_theta::Real
+  "Accumulated bank error"
+  variable xi_phi::Real
+  "Elevator command at the tick"
+  variable de::Real
+  "Aileron command at the tick"
+  variable da::Real
+relations
+  # Rotation is keyed to airspeed, not to a clock time, so the take-off stays
+  # self-sequencing when the mass or the thrust changes.
+  theta_cmd@clk = theta_ground + (theta_climb - theta_ground) * 0.5 * (1 + tanh((V@clk - V_rotate) / V_blend))
+  e_theta@clk = theta@clk - theta_cmd@clk
+  e_phi@clk = phi@clk - phi_cmd
+  # Rates by backward difference, not by differentiation
+  dtheta@clk = (theta@clk - theta@(clk-1)) / Ts
+  dphi@clk = (phi@clk - phi@(clk-1)) / Ts
+  # Integral, Euler, anti-windup off the previous output
+  xi_theta@clk = xi_theta@(clk-1) + Ts * e_theta@clk * (1 - (de@(clk-1) / delta_max) ^ 2)
+  xi_phi@clk = xi_phi@(clk-1) + Ts * e_phi@clk * (1 - (da@(clk-1) / delta_max) ^ 2)
+  # Control law
+  de@clk = delta_max * tanh((k_theta * (e_theta@clk + xi_theta@clk / T_i) + kd_theta * dtheta@clk) / delta_max)
+  da@clk = delta_max * tanh((-k_phi * (e_phi@clk + xi_phi@clk / T_i) - kd_phi * dphi@clk) / delta_max)
+  elevator@clk = de@clk
+  aileron@clk = da@clk
+  # The previous sample is seeded with the current one, so the first backward
+  # difference is zero rather than a step out of nowhere.
+  initial theta@(clk-1) = theta@clk
+  initial phi@(clk-1) = phi@clk
+  initial xi_theta@(clk-1) = 0.0
+  initial xi_phi@(clk-1) = 0.0
+  initial de@(clk-1) = 0.0
+  initial da@(clk-1) = 0.0
+metadata {
+  "_links": {
+    "theta": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 200, "x2": 50, "y2": 300}}}},
+    "phi": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}},
+    "V": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 700, "x2": 50, "y2": 800}}}},
+    "elevator": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}},
+    "aileron": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}}
   }
 }
 end
@@ -75,45 +476,39 @@ end
 """
 Sampled-data attitude hold: the same two loops as `Pilot`, running on a clock.
 
-# What is different from `Pilot`, and why it matters
+This is the whole flight computer --- the converters as well as the
+arithmetic. It presents continuous ports, so from outside it is a drop-in for
+`Pilot`, and inside it is the three pieces a sampled controller actually has:
 
-`Pilot` is a continuous controller --- a reasonable model of a human, who is
-not sampled. A flight computer is sampled, and three things change when you
-say so rather than assuming the difference away:
+* a `PeriodicClock` at `Ts`, which is what pins the rate;
+* a `Sampler` on each measurement, and the control law `AutopilotLaw` on the
+  clock;
+* a `ZeroOrderHold` on each command, so the roughly `Ts/2` of phase lag the
+  hold costs is in the model rather than absent from it.
 
-* **The rate terms become backward differences of the sampled attitude**,
-  `(theta_k - theta_k-1)/Ts`, not `der(theta)`. A digital controller cannot
-  differentiate a continuous signal; it differences successive samples. This
-  removes the continuous derivative from the loop entirely.
-* **The integral becomes an explicit Euler sum**, `xi_k = xi_k-1 + Ts*e_k`,
-  and the anti-windup factor has to read the *previous* output, because a
-  causal discrete loop cannot use the output it is in the middle of computing.
-* **The outputs are held between ticks.** The zero-order hold is explicit, so
-  the roughly `Ts/2` of phase lag it costs is in the model rather than absent
-  from it.
-
-Everything else --- the gains, the `tanh` saturation, the rotation on
-airspeed rather than on a clock time --- is carried over unchanged, so that
-at a fast sample rate this reproduces `Pilot` and any difference between the
-two is the sampling and nothing else.
-
-# Implementation
-
-Declared `external` and implemented in `dyad/digital_autopilot.jl`. The
-clocked equations themselves are perfectly expressible --- Dyad has the shift
-syntax (`x@(c - 1)`) and clock parameters (`@[input c]`) --- but this kernel
-has no way to bind a concrete periodic clock to such a parameter, so the
-partition comes out as an unresolved `InferredDiscrete` and compilation
-fails. Writing the equations in Julia against `Clock(Ts)` is what pins the
-rate. The semantics are the same synchronous ones either way.
+Everything else --- the gains, the `tanh` saturation, the rotation keyed on
+airspeed rather than on a clock time --- is carried over from `Pilot`
+unchanged, so that at a fast sample rate this reproduces `Pilot` and any
+difference between the two is the sampling and nothing else.
 
 # Sample period
 
 `Ts` is a **structural** parameter: the clock is constructed when the
 component is built, so changing the rate rebuilds the model rather than
-re-running it.
+re-running it. It is passed to both the clock and the law, which is what
+keeps the difference and the sum consistent with the rate they run at.
+
+# Compiling
+
+The clocked equations need SynchToolkit's synchronous pass. `simplify_model`
+adds it on its own; `multibody` does not, so a clocked harness has to be
+built with
+
+    multibody(model; additional_passes = [SynchToolkit.compile_lustre])
+
+or it dies with `HybridSystemNotSupportedException`.
 """
-external component DigitalAutopilot
+component DigitalAutopilot
   "Measured pitch attitude"
   theta = RealInput() {^theta}
   "Measured bank angle"
@@ -124,7 +519,26 @@ external component DigitalAutopilot
   elevator = RealOutput() {^elevator}
   "Aileron command, positive rolls right, held between ticks"
   aileron = RealOutput() {^aileron}
-
+  "Pins the rate of the whole controller"
+  clock = DiscreteComponents.PeriodicClock(dt = Ts) {^clock}
+  # The pitch loop and the roll loop share no equation --- this law has no
+  # turn compensation and no cross-feed --- so they reach the compiler as two
+  # separate clock partitions and the clock source pins only the one it is
+  # connected to. A second `PeriodicClock` is not the fix: two clock sources
+  # in one component body is an `invalid-clock-usage` error. `ClockPropagator`
+  # ties the roll loop's clock to the pitch loop's without tying their values.
+  # Airspeed needs no tie: it feeds `theta_cmd`, so it is already in the pitch
+  # partition.
+  "Ties the roll loop to the same clock as the pitch loop"
+  tie_roll = DiscreteComponents.ClockPropagator() {^tie_roll}
+  s_theta = DiscreteComponents.Sampler() {^s_theta}
+  s_phi = DiscreteComponents.Sampler() {^s_phi}
+  s_V = DiscreteComponents.Sampler() {^s_V}
+  "The control law, on the clock"
+  law = AutopilotLaw(Ts = Ts, theta_ground = theta_ground, theta_climb = theta_climb, V_rotate = V_rotate, V_blend = V_blend, phi_cmd = phi_cmd, k_theta = k_theta, kd_theta = kd_theta, k_phi = k_phi, kd_phi = kd_phi, T_i = T_i, delta_max = delta_max) {^law}
+  "Held commands, the single boundary back to continuous time"
+  h_elevator = DiscreteComponents.ZeroOrderHold() {^h_elevator}
+  h_aileron = DiscreteComponents.ZeroOrderHold() {^h_aileron}
   "Sample period; the clock is built with the component, so this is structural"
   structural parameter Ts::Real = 0.02
   "Pitch attitude held below the rotation speed"
@@ -150,6 +564,16 @@ external component DigitalAutopilot
   "Control deflection limit, both axes"
   parameter delta_max::Angle = 0.35
 relations
+  connect(theta, s_theta.u) {^id14}
+  connect(phi, s_phi.u) {^id15}
+  connect(V, s_V.u) {^id16}
+  connect(s_theta.y, law.theta, clock.y, tie_roll.u) {^id17}
+  connect(s_phi.y, law.phi, tie_roll.y) {^id18}
+  connect(s_V.y, law.V) {^id19}
+  connect(law.elevator, h_elevator.u) {^id20}
+  connect(law.aileron, h_aileron.u) {^id21}
+  connect(h_elevator.y, elevator) {^id22}
+  connect(h_aileron.y, aileron) {^id23}
 metadata {
   "Dyad": {
     "icons": {"default": "dyad://Multtest/DigitalAutopilot.svg"},
@@ -165,21 +589,45 @@ metadata {
     ]
   },
   "_links": {
-    "theta": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 200, "x2": 50, "y2": 300}}}
+    "theta": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 200, "x2": 50, "y2": 300}}}},
+    "phi": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}},
+    "V": {"Dyad": {"placement": {"icon": {"x1": -50, "y1": 700, "x2": 50, "y2": 800}}}},
+    "elevator": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}},
+    "aileron": {"Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}},
+    "clock": {
+      "Dyad": {"placement": {"diagram": {"x1": 440, "y1": 820, "x2": 540, "y2": 920}}}
     },
-    "phi": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 450, "x2": 50, "y2": 550}}}
+    "tie_roll": {
+      "Dyad": {"placement": {"diagram": {"x1": 220, "y1": 20, "x2": 320, "y2": 120}}}
     },
-    "V": {
-      "Dyad": {"placement": {"icon": {"x1": -50, "y1": 700, "x2": 50, "y2": 800}}}
+    "s_theta": {
+      "Dyad": {"placement": {"diagram": {"x1": 220, "y1": 200, "x2": 320, "y2": 300}}}
     },
-    "elevator": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 300, "x2": 1050, "y2": 400}}}
+    "s_phi": {
+      "Dyad": {"placement": {"diagram": {"x1": 220, "y1": 450, "x2": 320, "y2": 550}}}
     },
-    "aileron": {
-      "Dyad": {"placement": {"icon": {"x1": 950, "y1": 600, "x2": 1050, "y2": 700}}}
-    }
+    "s_V": {
+      "Dyad": {"placement": {"diagram": {"x1": 220, "y1": 700, "x2": 320, "y2": 800}}}
+    },
+    "law": {
+      "Dyad": {"placement": {"diagram": {"x1": 440, "y1": 400, "x2": 560, "y2": 560}}}
+    },
+    "h_elevator": {
+      "Dyad": {"placement": {"diagram": {"x1": 700, "y1": 300, "x2": 800, "y2": 400}}}
+    },
+    "h_aileron": {
+      "Dyad": {"placement": {"diagram": {"x1": 700, "y1": 600, "x2": 800, "y2": 700}}}
+    },
+    "id14": {},
+    "id15": {},
+    "id16": {},
+    "id17": {},
+    "id18": {},
+    "id19": {},
+    "id20": {},
+    "id21": {},
+    "id22": {},
+    "id23": {}
   }
 }
 end

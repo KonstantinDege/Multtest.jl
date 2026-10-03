@@ -80,7 +80,7 @@ component Pilot
   "Mount on the aircraft datum; attitude and velocity are read from here"
   frame_a = Frame3D() {^frame_a}
   "Density and wind, so the loops work on airspeed rather than ground speed"
-  air = AirState() {^air}
+  air = AirStateInput() {^air}
   "Elevator command, positive trailing edge down"
   elevator = RealOutput() {^elevator}
   "Aileron command, positive rolls right"

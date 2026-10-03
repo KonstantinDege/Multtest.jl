@@ -37,7 +37,7 @@ component DragBody
   "Mount at the body's centre of pressure"
   frame_a = Frame3D() {^frame_a}
   "Density and wind at the body"
-  air = AirState() {^air}
+  air = AirStateInput() {^air}
   "Drag area Cd*S for motion along the body x axis"
   parameter CdA_x::Area = 0.05
   "Drag area Cd*S for motion along the body y axis"
